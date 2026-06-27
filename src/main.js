@@ -4,7 +4,6 @@ import './style.css';
 const STORAGE_KEYS = {
   token: 'mindflow.githubToken',
   user: 'mindflow.githubUser',
-  repo: 'mindflow.repo',
   map: 'mindflow.localMap',
   status: 'mindflow.status',
 };
@@ -30,7 +29,8 @@ function defaultMap() {
 
 function readJson(key, fallback) {
   try {
-    return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback));
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
@@ -53,7 +53,7 @@ function clearSession() {
   localStorage.removeItem(STORAGE_KEYS.user);
 }
 
-async function githubFetch(path, { method = 'GET', body, raw = false } = {}) {
+async function githubFetch(path, { method = 'GET', body } = {}) {
   const token = getToken();
   if (!token) {
     throw new Error('GitHub token がありません。');
@@ -72,19 +72,10 @@ async function githubFetch(path, { method = 'GET', body, raw = false } = {}) {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    const message = error.message || `${response.status} ${response.statusText}`;
-    throw new Error(message);
-  }
-
-  if (raw) {
-    return response;
+    throw new Error(error.message || `${response.status} ${response.statusText}`);
   }
 
   return response.json();
-}
-
-async function fetchViewer() {
-  return githubFetch('/user');
 }
 
 function encodeContent(value) {
@@ -93,6 +84,10 @@ function encodeContent(value) {
 
 function decodeContent(value) {
   return JSON.parse(decodeURIComponent(escape(atob(value))));
+}
+
+async function fetchViewer() {
+  return githubFetch('/user');
 }
 
 async function readRemoteMap(owner, repo) {
@@ -121,57 +116,51 @@ async function writeRemoteMap(owner, repo, payload, sha) {
   });
 }
 
-function renderTokenScreen(app) {
+function setStatus(text, tone = 'muted') {
+  const status = document.getElementById('statusPill');
+  if (status) {
+    status.textContent = text;
+    status.dataset.tone = tone;
+  }
+  writeJson(STORAGE_KEYS.status, { text, tone });
+}
+
+function restoreStatus() {
+  const saved = readJson(STORAGE_KEYS.status, { text: '未同期', tone: 'muted' });
+  setStatus(saved.text, saved.tone);
+}
+
+function renderTokenScreen(app, errorMessage = '') {
   app.innerHTML = `
     <main class="shell auth-shell">
       <section class="auth-card">
         <p class="eyebrow">Private Mobile Mind Map</p>
         <h1>MindFlow</h1>
         <p class="lede">
-          GitHub Pages 上で動く個人専用マインドマップです。
-          GitHub personal access token を入れた端末だけが同期できます。
+          GitHub の private repo に直接保存する、個人用マインドマップです。
         </p>
         <label class="field">
           <span>GitHub Token</span>
-          <input id="tokenInput" type="password" placeholder="github_pat_..." autocomplete="off" />
+          <input id="tokenInput" type="password" placeholder="貼り付けてください" autocomplete="off" />
         </label>
         <p class="hint">
-          必要権限: <code>mktr55/mindflow-data</code> に対する fine-grained token の
-          <code>Contents: Read and write</code> と <code>Metadata: Read</code>。
+          対象 repo は <code>mktr55/mindflow-data</code>。
+          権限は <code>Contents: Read and write</code> と <code>Metadata: Read</code>。
         </p>
         <button id="tokenSubmit" class="primary-btn">接続する</button>
-        <p id="tokenError" class="error-text"></p>
+        <p id="tokenError" class="error-text">${errorMessage}</p>
       </section>
     </main>
   `;
 
-  const input = document.getElementById('tokenInput');
-  const error = document.getElementById('tokenError');
-  document.getElementById('tokenSubmit').addEventListener('click', async () => {
-    error.textContent = '';
+  document.getElementById('tokenSubmit').addEventListener('click', () => {
+    const input = document.getElementById('tokenInput');
     setToken(input.value);
-    try {
-      await boot(app);
-    } catch (err) {
+    boot(app).catch((error) => {
       clearSession();
-      error.textContent = err.message;
-    }
+      renderTokenScreen(app, error.message);
+    });
   });
-}
-
-function setStatus(text, tone = 'muted') {
-  const el = document.getElementById('statusPill');
-  if (!el) {
-    return;
-  }
-  el.textContent = text;
-  el.dataset.tone = tone;
-  localStorage.setItem(STORAGE_KEYS.status, JSON.stringify({ text, tone }));
-}
-
-function restoreStatus() {
-  const saved = readJson(STORAGE_KEYS.status, { text: '未同期', tone: 'muted' });
-  setStatus(saved.text, saved.tone);
 }
 
 function renderAppShell(app, user) {
@@ -192,6 +181,7 @@ function renderAppShell(app, user) {
           <button id="fitBtn">全体表示</button>
           <button id="syncBtn" class="primary-btn">今すぐ同期</button>
         </div>
+        <p class="inline-hint">まず丸いノードを1回タップしてから操作できます。起動直後は中央ノードを自動選択します。</p>
         <div class="meta-row">
           <span id="statusPill" class="status-pill" data-tone="muted">未同期</span>
           <span class="repo-label">${user.login}/${DEFAULT_REPO}</span>
@@ -200,22 +190,33 @@ function renderAppShell(app, user) {
       </section>
     </main>
   `;
+
   restoreStatus();
+}
+
+function selectRootNode(mindMap) {
+  const root = mindMap?.renderer?.root;
+  if (root && typeof root.active === 'function') {
+    root.active();
+  }
+}
+
+function getSelectedNode(mindMap) {
+  return mindMap?.renderer?.activeNodeList?.[0] || null;
 }
 
 async function boot(app) {
   const user = await fetchViewer();
-  writeJson(STORAGE_KEYS.user, user);
-  writeJson(STORAGE_KEYS.repo, { owner: user.login, repo: DEFAULT_REPO });
 
   try {
     await githubFetch(`/repos/${user.login}/${DEFAULT_REPO}`);
-  } catch (error) {
+  } catch {
     throw new Error(
-      `保存先 ${user.login}/${DEFAULT_REPO} にアクセスできません。fine-grained token の対象 repo と権限を確認してください。`,
+      `保存先 ${user.login}/${DEFAULT_REPO} にアクセスできません。token の対象 repo と権限を確認してください。`,
     );
   }
 
+  writeJson(STORAGE_KEYS.user, user);
   renderAppShell(app, user);
 
   const localPayload = readJson(STORAGE_KEYS.map, defaultMap());
@@ -230,6 +231,10 @@ async function boot(app) {
     fit: true,
     enableAutoEnterTextEditWhenKeydown: true,
     nodeTextEditZIndex: 20,
+  });
+
+  requestAnimationFrame(() => {
+    selectRootNode(mindMap);
   });
 
   let currentSha = remotePayload?.sha || null;
@@ -268,16 +273,33 @@ async function boot(app) {
   };
 
   mindMap.on('data_change', queueSync);
+  mindMap.on('draw_click', () => {
+    window.setTimeout(() => {
+      if (!getSelectedNode(mindMap)) {
+        selectRootNode(mindMap);
+      }
+    }, 0);
+  });
 
   document.getElementById('addChildBtn').addEventListener('click', () => {
+    if (!getSelectedNode(mindMap)) {
+      selectRootNode(mindMap);
+    }
     mindMap.execCommand('INSERT_CHILD_NODE');
   });
 
   document.getElementById('addSiblingBtn').addEventListener('click', () => {
+    if (!getSelectedNode(mindMap)) {
+      selectRootNode(mindMap);
+    }
     mindMap.execCommand('INSERT_NODE');
   });
 
   document.getElementById('deleteBtn').addEventListener('click', () => {
+    if (!getSelectedNode(mindMap)) {
+      selectRootNode(mindMap);
+      return;
+    }
     mindMap.execCommand('REMOVE_NODE');
   });
 
@@ -300,13 +322,11 @@ async function boot(app) {
 }
 
 const app = document.getElementById('app');
+
 if (getToken()) {
   boot(app).catch((error) => {
-    renderTokenScreen(app);
-    const errorEl = document.getElementById('tokenError');
-    if (errorEl) {
-      errorEl.textContent = error.message;
-    }
+    clearSession();
+    renderTokenScreen(app, error.message);
   });
 } else {
   renderTokenScreen(app);

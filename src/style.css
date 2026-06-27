@@ -147,6 +147,13 @@ button {
   font-size: 14px;
 }
 
+.inline-hint {
+  margin: 10px 2px 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
