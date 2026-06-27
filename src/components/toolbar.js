@@ -1,5 +1,4 @@
 import { LAYOUTS, EXPORT_FORMATS } from '../utils/constants.js';
-import { toggleTheme, getThemePreference } from '../themes/themes.js';
 import { toast } from './toast.js';
 import { logout } from '../auth/github-oauth.js';
 
@@ -61,9 +60,7 @@ export function createToolbar(mindMapInstance, { onOpenFiles, onToggleMinimap, o
   document.body.appendChild(toolbar);
 
   wireEvents();
-  updateThemeBtn();
   const api = {
-    updateThemeBtn,
     startConnect,
     openNodeContextMenu,
     openRelationLineContextMenu,
@@ -125,10 +122,7 @@ function buildHTML() {
     <!-- Minimap -->
     <button class="toolbar-btn active" id="tbMinimap" data-tooltip="ミニマップ">${I.minimap}</button>
 
-    <!-- Theme -->
-    <button class="toolbar-btn" id="tbTheme" data-tooltip="テーマ切替">${I.sun}</button>
-
-    <!-- Logout -->
+  <!-- Logout -->
     <button class="toolbar-btn" id="tbLogout" data-tooltip="ログアウト" style="color:var(--text-muted)">${I.logout}</button>
   `;
 }
@@ -158,15 +152,6 @@ function wireEvents() {
     minimapVisible = !minimapVisible;
     g('tbMinimap').classList.toggle('active', minimapVisible);
     _onToggleMinimap?.(minimapVisible);
-  };
-
-  // Theme toggle
-  g('tbTheme').onclick = () => {
-    const theme = toggleTheme();
-    updateThemeBtn();
-    // Sync mind map background via SET_THEME command
-    const bgColor = theme === 'dark' ? '#0d1117' : '#f6f8fa';
-    _mindMap?.execCommand('SET_THEME_CONFIG', { backgroundColor: bgColor });
   };
 
   // Logout
@@ -216,14 +201,6 @@ function closeAllDropdowns() {
 }
 
 document.addEventListener('click', closeAllDropdowns);
-
-function updateThemeBtn() {
-  const btn = toolbar?.querySelector('#tbTheme');
-  if (!btn) return;
-  const isDark = getThemePreference() === 'dark';
-  btn.innerHTML    = isDark ? I.sun : I.moon;
-  btn.dataset.tooltip = isDark ? 'ライトモード' : 'ダークモード';
-}
 
 /* ── Connection mode / context menu ──────────────────────────────── */
 export function startConnect(fromNode = null) {

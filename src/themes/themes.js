@@ -119,22 +119,21 @@ export const LIGHT_MIND_MAP_THEME = {
 };
 
 export function getThemePreference() {
-  return localStorage.getItem(STORAGE_KEYS.THEME) || 'dark';
+  return 'dark';
 }
 
 export function setThemePreference(theme) {
-  localStorage.setItem(STORAGE_KEYS.THEME, theme);
-  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem(STORAGE_KEYS.THEME, 'dark');
+  document.documentElement.setAttribute('data-theme', 'dark');
 }
 
 export function toggleTheme() {
-  const next = getThemePreference() === 'dark' ? 'light' : 'dark';
-  setThemePreference(next);
-  return next;
+  setThemePreference('dark');
+  return 'dark';
 }
 
 export function getMindMapTheme(theme) {
-  return theme === 'dark' ? DARK_MIND_MAP_THEME : LIGHT_MIND_MAP_THEME;
+  return DARK_MIND_MAP_THEME;
 }
 
 export function initTheme() {
