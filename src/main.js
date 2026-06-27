@@ -1,5 +1,8 @@
 import MindMap from 'simple-mind-map';
+import TouchEvent from 'simple-mind-map/src/plugins/TouchEvent.js';
 import './style.css';
+
+MindMap.usePlugin(TouchEvent);
 
 const STORAGE_KEYS = {
   token: 'mindflow.githubToken',
@@ -559,6 +562,9 @@ async function boot(app) {
     data: buildMindMapData(getCurrentMap(workspace)),
     fit: true,
     enableAutoEnterTextEditWhenKeydown: true,
+    disableTouchZoom: false,
+    minTouchZoomScale: 10,
+    maxTouchZoomScale: 300,
     openRealtimeRenderOnNodeTextEdit: true,
     defaultInsertSecondLevelNodeText: '新しいトピック',
     defaultInsertBelowSecondLevelNodeText: '新しいトピック',
