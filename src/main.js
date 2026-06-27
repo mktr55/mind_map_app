@@ -4,26 +4,53 @@ import './style.css';
 const STORAGE_KEYS = {
   token: 'mindflow.githubToken',
   user: 'mindflow.githubUser',
-  map: 'mindflow.localMap',
+  workspace: 'mindflow.workspace',
   status: 'mindflow.status',
 };
 
-const DEFAULT_REPO = 'mindflow-data';
-const DEFAULT_PATH = 'mindflow/mindflow.json';
 const API_BASE = 'https://api.github.com';
+const DEFAULT_REPO = 'mindflow-data';
+const DEFAULT_PATH = 'mindflow/workspace.json';
 
-function defaultMap() {
+function createNode(text, ts, suffix) {
+  return {
+    data: {
+      text,
+      expand: true,
+      uid: `${suffix}-${ts}-${Math.random().toString(36).slice(2, 8)}`,
+    },
+    children: [],
+  };
+}
+
+function createBlankMap(title = '新しいマインドマップ') {
   const ts = Date.now();
   return {
+    id: `map-${ts}-${Math.random().toString(36).slice(2, 8)}`,
+    title,
+    updatedAt: new Date().toISOString(),
     root: {
-      data: { text: 'MindFlow', expand: true, uid: `root-${ts}` },
+      data: {
+        text: title,
+        expand: true,
+        uid: `root-${ts}`,
+      },
       children: [
-        { data: { text: '今日やること', expand: true, uid: `a-${ts}` }, children: [] },
-        { data: { text: '気になること', expand: true, uid: `b-${ts}` }, children: [] },
-        { data: { text: 'あとで整理', expand: true, uid: `c-${ts}` }, children: [] },
+        createNode('アイデア', ts, 'idea'),
+        createNode('調べる', ts, 'research'),
+        createNode('次の一歩', ts, 'next'),
       ],
     },
     layout: 'logicalStructure',
+  };
+}
+
+function createDefaultWorkspace() {
+  const firstMap = createBlankMap('MindFlow');
+  return {
+    currentMapId: firstMap.id,
+    maps: [firstMap],
+    updatedAt: new Date().toISOString(),
   };
 }
 
@@ -51,6 +78,20 @@ function setToken(token) {
 function clearSession() {
   localStorage.removeItem(STORAGE_KEYS.token);
   localStorage.removeItem(STORAGE_KEYS.user);
+}
+
+function setStatus(text, tone = 'muted') {
+  const el = document.getElementById('statusPill');
+  if (el) {
+    el.textContent = text;
+    el.dataset.tone = tone;
+  }
+  writeJson(STORAGE_KEYS.status, { text, tone });
+}
+
+function restoreStatus() {
+  const saved = readJson(STORAGE_KEYS.status, { text: '未同期', tone: 'muted' });
+  setStatus(saved.text, saved.tone);
 }
 
 async function githubFetch(path, { method = 'GET', body } = {}) {
@@ -86,81 +127,133 @@ function decodeContent(value) {
   return JSON.parse(decodeURIComponent(escape(atob(value))));
 }
 
+function normalizeWorkspace(input) {
+  if (!input || typeof input !== 'object') {
+    return createDefaultWorkspace();
+  }
+
+  if (Array.isArray(input.maps) && input.maps.length > 0) {
+    const maps = input.maps.map((map, index) => ({
+      id: map.id || `map-${Date.now()}-${index}`,
+      title: map.title || map.root?.data?.text || `マインドマップ ${index + 1}`,
+      updatedAt: map.updatedAt || new Date().toISOString(),
+      root: map.root,
+      layout: map.layout || 'logicalStructure',
+    })).filter((map) => map.root);
+
+    if (maps.length === 0) {
+      return createDefaultWorkspace();
+    }
+
+    return {
+      currentMapId: maps.some((map) => map.id === input.currentMapId) ? input.currentMapId : maps[0].id,
+      maps,
+      updatedAt: input.updatedAt || new Date().toISOString(),
+    };
+  }
+
+  if (input.root) {
+    const single = {
+      id: input.id || `legacy-${Date.now()}`,
+      title: input.title || input.root?.data?.text || 'MindFlow',
+      updatedAt: input.updatedAt || new Date().toISOString(),
+      root: input.root,
+      layout: input.layout || 'logicalStructure',
+    };
+    return {
+      currentMapId: single.id,
+      maps: [single],
+      updatedAt: single.updatedAt,
+    };
+  }
+
+  return createDefaultWorkspace();
+}
+
 async function fetchViewer() {
   return githubFetch('/user');
 }
 
-async function readRemoteMap(owner, repo) {
+async function ensurePrivateRepo(owner) {
   try {
-    const file = await githubFetch(`/repos/${owner}/${repo}/contents/${DEFAULT_PATH}`);
+    return await githubFetch(`/repos/${owner}/${DEFAULT_REPO}`);
+  } catch (error) {
+    if (!String(error.message).includes('Not Found')) {
+      throw error;
+    }
+  }
+
+  return githubFetch('/user/repos', {
+    method: 'POST',
+    body: {
+      name: DEFAULT_REPO,
+      private: true,
+      auto_init: true,
+      description: 'MindFlow mobile sync data',
+    },
+  });
+}
+
+async function readRemoteWorkspace(owner) {
+  try {
+    const file = await githubFetch(`/repos/${owner}/${DEFAULT_REPO}/contents/${DEFAULT_PATH}`);
     return {
       sha: file.sha,
-      content: decodeContent(file.content.replace(/\n/g, '')),
+      content: normalizeWorkspace(decodeContent(file.content.replace(/\n/g, ''))),
     };
   } catch (error) {
-    const message = String(error.message);
-    if (message.includes('Not Found') || message.includes('This repository is empty.')) {
+    if (String(error.message).includes('Not Found')) {
       return null;
     }
     throw error;
   }
 }
 
-async function writeRemoteMap(owner, repo, payload, sha) {
-  return githubFetch(`/repos/${owner}/${repo}/contents/${DEFAULT_PATH}`, {
+async function writeRemoteWorkspace(owner, workspace, sha) {
+  return githubFetch(`/repos/${owner}/${DEFAULT_REPO}/contents/${DEFAULT_PATH}`, {
     method: 'PUT',
     body: {
-      message: 'MindFlow mobile sync',
-      content: encodeContent(payload),
+      message: 'MindFlow workspace sync',
+      content: encodeContent(workspace),
       ...(sha ? { sha } : {}),
     },
   });
 }
 
-function setStatus(text, tone = 'muted') {
-  const status = document.getElementById('statusPill');
-  if (status) {
-    status.textContent = text;
-    status.dataset.tone = tone;
-  }
-  writeJson(STORAGE_KEYS.status, { text, tone });
-}
-
-function restoreStatus() {
-  const saved = readJson(STORAGE_KEYS.status, { text: '未同期', tone: 'muted' });
-  setStatus(saved.text, saved.tone);
-}
-
-function renderTokenScreen(app, errorMessage = '') {
+function renderTokenScreen(app) {
   app.innerHTML = `
     <main class="shell auth-shell">
       <section class="auth-card">
         <p class="eyebrow">Private Mobile Mind Map</p>
         <h1>MindFlow</h1>
         <p class="lede">
-          GitHub の private repo に直接保存する、個人用マインドマップです。
+          GitHub token を入れた自分の端末だけで、複数のマインドマップを保存して使えます。
         </p>
         <label class="field">
           <span>GitHub Token</span>
-          <input id="tokenInput" type="password" placeholder="貼り付けてください" autocomplete="off" />
+          <input id="tokenInput" type="password" placeholder="github_pat_..." autocomplete="off" />
         </label>
         <p class="hint">
-          対象 repo は <code>mktr55/mindflow-data</code>。
-          権限は <code>Contents: Read and write</code> と <code>Metadata: Read</code>。
+          classic token なら <code>repo</code>。fine-grained token なら private repo の
+          <code>Contents: Read and write</code> と <code>Metadata: Read</code> が必要です。
         </p>
-        <button id="tokenSubmit" class="primary-btn">接続する</button>
-        <p id="tokenError" class="error-text">${errorMessage}</p>
+        <button id="tokenSubmit" class="primary-btn wide-btn">接続する</button>
+        <p id="tokenError" class="error-text"></p>
       </section>
     </main>
   `;
 
-  document.getElementById('tokenSubmit').addEventListener('click', () => {
-    const input = document.getElementById('tokenInput');
+  const input = document.getElementById('tokenInput');
+  const error = document.getElementById('tokenError');
+  document.getElementById('tokenSubmit').addEventListener('click', async () => {
+    error.textContent = '';
     setToken(input.value);
-    boot(app).catch((error) => {
+    try {
+      await boot(app);
+    } catch (err) {
       clearSession();
-      renderTokenScreen(app, error.message);
-    });
+      error.textContent = err.message;
+    }
   });
 }
 
@@ -172,27 +265,76 @@ function renderAppShell(app, user) {
           <p class="eyebrow">Signed in as @${user.login}</p>
           <h1>MindFlow</h1>
         </div>
-        <button id="logoutBtn" class="ghost-btn">ログアウト</button>
-      </header>
-      <section class="panel">
-        <div class="toolbar">
-          <button id="addChildBtn">子ノード</button>
-          <button id="addSiblingBtn">兄弟ノード</button>
-          <button id="deleteBtn">削除</button>
-          <button id="fitBtn">全体表示</button>
-          <button id="syncBtn" class="primary-btn">今すぐ同期</button>
-        </div>
-        <p class="inline-hint">まず丸いノードを1回タップしてから操作できます。起動直後は中央ノードを自動選択します。</p>
-        <div class="meta-row">
-          <span id="statusPill" class="status-pill" data-tone="muted">未同期</span>
+        <div class="topbar-actions">
           <span class="repo-label">${user.login}/${DEFAULT_REPO}</span>
+          <button id="logoutBtn" class="ghost-btn">ログアウト</button>
         </div>
-        <div id="mindMapMount" class="mindmap-frame"></div>
+      </header>
+      <section class="workspace">
+        <aside class="sidebar panel">
+          <div class="sidebar-head">
+            <div>
+              <p class="section-label">Maps</p>
+              <h2>保存済み一覧</h2>
+            </div>
+            <button id="newMapBtn" class="primary-btn small-btn">新規</button>
+          </div>
+          <div id="mapList" class="map-list"></div>
+        </aside>
+        <section class="editor panel">
+          <div class="toolbar">
+            <button id="renameMapBtn">名前変更</button>
+            <button id="addChildBtn">子ノード</button>
+            <button id="addSiblingBtn">兄弟ノード</button>
+            <button id="deleteNodeBtn">ノード削除</button>
+            <button id="fitBtn">全体表示</button>
+            <button id="syncBtn" class="primary-btn">今すぐ同期</button>
+          </div>
+          <p class="inline-hint">左でマップを切り替え、中央ノードをタップしてから編集できます。</p>
+          <div class="meta-row">
+            <span id="statusPill" class="status-pill" data-tone="muted">未同期</span>
+            <button id="deleteMapBtn" class="danger-btn small-btn">このマップを削除</button>
+          </div>
+          <div id="mindMapMount" class="mindmap-frame"></div>
+        </section>
       </section>
     </main>
   `;
-
   restoreStatus();
+}
+
+function formatUpdatedAt(value) {
+  if (!value) {
+    return '';
+  }
+  try {
+    return new Date(value).toLocaleString('ja-JP', {
+      month: 'numeric',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return '';
+  }
+}
+
+function renderMapList(workspace) {
+  const list = document.getElementById('mapList');
+  list.innerHTML = workspace.maps
+    .slice()
+    .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+    .map((map) => `
+      <button class="map-card ${map.id === workspace.currentMapId ? 'active' : ''}" data-map-id="${map.id}">
+        <span class="map-card-title">${map.title}</span>
+        <span class="map-card-time">${formatUpdatedAt(map.updatedAt)}</span>
+      </button>
+    `)
+    .join('');
+}
+
+function getCurrentMap(workspace) {
+  return workspace.maps.find((map) => map.id === workspace.currentMapId) || workspace.maps[0];
 }
 
 function selectRootNode(mindMap) {
@@ -202,66 +344,66 @@ function selectRootNode(mindMap) {
   }
 }
 
-function getSelectedNode(mindMap) {
-  return mindMap?.renderer?.activeNodeList?.[0] || null;
-}
-
 async function boot(app) {
   const user = await fetchViewer();
-
-  try {
-    await githubFetch(`/repos/${user.login}/${DEFAULT_REPO}`);
-  } catch {
-    throw new Error(
-      `保存先 ${user.login}/${DEFAULT_REPO} にアクセスできません。token の対象 repo と権限を確認してください。`,
-    );
-  }
-
   writeJson(STORAGE_KEYS.user, user);
+  await ensurePrivateRepo(user.login);
+
   renderAppShell(app, user);
 
-  const localPayload = readJson(STORAGE_KEYS.map, defaultMap());
-  const remotePayload = await readRemoteMap(user.login, DEFAULT_REPO);
-  const initialPayload = remotePayload?.content || localPayload;
-  writeJson(STORAGE_KEYS.map, initialPayload);
+  const localWorkspace = normalizeWorkspace(readJson(STORAGE_KEYS.workspace, createDefaultWorkspace()));
+  const remoteWorkspace = await readRemoteWorkspace(user.login);
+  let workspace = remoteWorkspace?.content || localWorkspace;
+  writeJson(STORAGE_KEYS.workspace, workspace);
 
+  let currentSha = remoteWorkspace?.sha || null;
+  let syncTimer = null;
+  let suppressSave = false;
+
+  const mount = document.getElementById('mindMapMount');
   const mindMap = new MindMap({
-    el: document.getElementById('mindMapMount'),
-    data: initialPayload.root,
-    layout: initialPayload.layout || 'logicalStructure',
+    el: mount,
+    data: getCurrentMap(workspace).root,
+    layout: getCurrentMap(workspace).layout || 'logicalStructure',
     fit: true,
     enableAutoEnterTextEditWhenKeydown: true,
     nodeTextEditZIndex: 20,
   });
 
-  requestAnimationFrame(() => {
-    selectRootNode(mindMap);
-  });
+  const persistWorkspace = () => {
+    workspace.updatedAt = new Date().toISOString();
+    writeJson(STORAGE_KEYS.workspace, workspace);
+  };
 
-  let currentSha = remotePayload?.sha || null;
-  let syncTimer = null;
+  const saveCurrentMapFromCanvas = () => {
+    if (suppressSave) {
+      return;
+    }
 
-  const snapshot = () => {
+    const active = getCurrentMap(workspace);
+    if (!active) {
+      return;
+    }
+
     const full = mindMap.getData();
-    const payload = {
-      root: full.root || full,
-      layout: full.layout || 'logicalStructure',
-      updatedAt: new Date().toISOString(),
-    };
-    writeJson(STORAGE_KEYS.map, payload);
-    return payload;
+    active.root = full.root || full;
+    active.layout = full.layout || active.layout || 'logicalStructure';
+    active.title = active.root?.data?.text?.trim() || active.title || '無題';
+    active.updatedAt = new Date().toISOString();
+    persistWorkspace();
+    renderMapList(workspace);
   };
 
   const syncNow = async () => {
-    const payload = snapshot();
+    saveCurrentMapFromCanvas();
     setStatus('同期中…', 'busy');
-    const result = await writeRemoteMap(user.login, DEFAULT_REPO, payload, currentSha);
+    const result = await writeRemoteWorkspace(user.login, workspace, currentSha);
     currentSha = result.content?.sha || currentSha;
     setStatus('GitHub に保存済み', 'ok');
   };
 
   const queueSync = () => {
-    snapshot();
+    saveCurrentMapFromCanvas();
     setStatus('ローカル保存済み', 'muted');
     window.clearTimeout(syncTimer);
     syncTimer = window.setTimeout(async () => {
@@ -273,34 +415,97 @@ async function boot(app) {
     }, 1200);
   };
 
+  const loadMapIntoCanvas = (mapId) => {
+    const nextMap = workspace.maps.find((map) => map.id === mapId);
+    if (!nextMap) {
+      return;
+    }
+
+    saveCurrentMapFromCanvas();
+    workspace.currentMapId = nextMap.id;
+    persistWorkspace();
+    renderMapList(workspace);
+
+    suppressSave = true;
+    mindMap.setData(nextMap.root);
+    mindMap.setLayout(nextMap.layout || 'logicalStructure');
+    suppressSave = false;
+    mindMap.view.fit();
+    window.setTimeout(() => selectRootNode(mindMap), 0);
+  };
+
+  renderMapList(workspace);
+  window.setTimeout(() => selectRootNode(mindMap), 0);
+
   mindMap.on('data_change', queueSync);
-  mindMap.on('draw_click', () => {
-    window.setTimeout(() => {
-      if (!getSelectedNode(mindMap)) {
-        selectRootNode(mindMap);
-      }
-    }, 0);
+
+  document.getElementById('mapList').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-map-id]');
+    if (!button) {
+      return;
+    }
+    loadMapIntoCanvas(button.dataset.mapId);
+  });
+
+  document.getElementById('newMapBtn').addEventListener('click', () => {
+    const title = window.prompt('新しいマインドマップ名', `マインドマップ ${workspace.maps.length + 1}`);
+    if (!title) {
+      return;
+    }
+    saveCurrentMapFromCanvas();
+    const map = createBlankMap(title.trim() || `マインドマップ ${workspace.maps.length + 1}`);
+    workspace.maps.unshift(map);
+    workspace.currentMapId = map.id;
+    persistWorkspace();
+    renderMapList(workspace);
+    loadMapIntoCanvas(map.id);
+    queueSync();
+  });
+
+  document.getElementById('renameMapBtn').addEventListener('click', () => {
+    const current = getCurrentMap(workspace);
+    const title = window.prompt('マップ名を変更', current.title);
+    if (!title) {
+      return;
+    }
+    current.title = title.trim() || current.title;
+    current.root.data.text = current.title;
+    current.updatedAt = new Date().toISOString();
+    persistWorkspace();
+    renderMapList(workspace);
+    suppressSave = true;
+    mindMap.setData(current.root);
+    suppressSave = false;
+    queueSync();
+  });
+
+  document.getElementById('deleteMapBtn').addEventListener('click', () => {
+    if (workspace.maps.length === 1) {
+      window.alert('最後の1枚は削除できません。');
+      return;
+    }
+    const current = getCurrentMap(workspace);
+    const confirmed = window.confirm(`「${current.title}」を削除しますか？`);
+    if (!confirmed) {
+      return;
+    }
+    workspace.maps = workspace.maps.filter((map) => map.id !== current.id);
+    workspace.currentMapId = workspace.maps[0].id;
+    persistWorkspace();
+    renderMapList(workspace);
+    loadMapIntoCanvas(workspace.currentMapId);
+    queueSync();
   });
 
   document.getElementById('addChildBtn').addEventListener('click', () => {
-    if (!getSelectedNode(mindMap)) {
-      selectRootNode(mindMap);
-    }
     mindMap.execCommand('INSERT_CHILD_NODE');
   });
 
   document.getElementById('addSiblingBtn').addEventListener('click', () => {
-    if (!getSelectedNode(mindMap)) {
-      selectRootNode(mindMap);
-    }
     mindMap.execCommand('INSERT_NODE');
   });
 
-  document.getElementById('deleteBtn').addEventListener('click', () => {
-    if (!getSelectedNode(mindMap)) {
-      selectRootNode(mindMap);
-      return;
-    }
+  document.getElementById('deleteNodeBtn').addEventListener('click', () => {
     mindMap.execCommand('REMOVE_NODE');
   });
 
@@ -323,11 +528,13 @@ async function boot(app) {
 }
 
 const app = document.getElementById('app');
-
 if (getToken()) {
   boot(app).catch((error) => {
-    clearSession();
-    renderTokenScreen(app, error.message);
+    renderTokenScreen(app);
+    const errorEl = document.getElementById('tokenError');
+    if (errorEl) {
+      errorEl.textContent = error.message;
+    }
   });
 } else {
   renderTokenScreen(app);
