@@ -275,17 +275,19 @@ function renderAppShell(app, user) {
   app.innerHTML = `
     <main class="shell">
       <header class="topbar">
-        <div>
+        <button id="toggleSidebarBtn" class="mobile-nav-btn" type="button">‹</button>
+        <div class="topbar-brand">
           <p class="eyebrow">Signed in as @${user.login}</p>
           <h1>MindFlow</h1>
         </div>
         <div class="topbar-actions">
           <span class="repo-label">${user.login}/${DEFAULT_REPO}</span>
+          <button id="syncBtn" class="primary-btn small-btn">同期</button>
           <button id="logoutBtn" class="ghost-btn">ログアウト</button>
         </div>
       </header>
       <section class="workspace">
-        <aside class="sidebar panel">
+        <aside class="sidebar panel" id="sidebarPanel">
           <div class="sidebar-head">
             <div>
               <p class="section-label">Maps</p>
@@ -301,12 +303,11 @@ function renderAppShell(app, user) {
         </aside>
       <section class="editor panel">
         <div class="toolbar">
-          <button id="renameMapBtn">名前変更</button>
-          <button id="addChildBtn">子ノード</button>
-          <button id="addSiblingBtn">兄弟ノード</button>
-          <button id="deleteNodeBtn">ノード削除</button>
-          <button id="fitBtn">全体表示</button>
-          <button id="syncBtn" class="primary-btn">今すぐ同期</button>
+          <button id="renameMapBtn">名前</button>
+          <button id="addChildBtn">子</button>
+          <button id="addSiblingBtn">兄弟</button>
+          <button id="deleteNodeBtn">削除</button>
+          <button id="fitBtn">全体</button>
         </div>
         <div class="node-editor-strip">
           <label for="nodeTextInput">選択ノード</label>
@@ -320,6 +321,7 @@ function renderAppShell(app, user) {
           <div id="mindMapMount" class="mindmap-frame"></div>
         </section>
       </section>
+      <button id="sidebarBackdrop" class="sidebar-backdrop" type="button" aria-label="閉じる"></button>
     </main>
   `;
 
@@ -574,6 +576,9 @@ async function boot(app) {
   const nodeTextInput = document.getElementById('nodeTextInput');
   const importMapBtn = document.getElementById('importMapBtn');
   const importMapInput = document.getElementById('importMapInput');
+  const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
+  const sidebarPanel = document.getElementById('sidebarPanel');
+  const sidebarBackdrop = document.getElementById('sidebarBackdrop');
 
   const isTextEditing = () => Boolean(mindMap.renderer?.textEdit?.isShowTextEdit?.());
 
@@ -595,6 +600,16 @@ async function boot(app) {
     writeJson(STORAGE_KEYS.workspace, workspace);
   };
 
+  const closeSidebar = () => {
+    sidebarPanel?.classList.remove('open');
+    sidebarBackdrop?.classList.remove('visible');
+  };
+
+  const toggleSidebar = () => {
+    sidebarPanel?.classList.toggle('open');
+    sidebarBackdrop?.classList.toggle('visible', sidebarPanel?.classList.contains('open'));
+  };
+
   const importMapsIntoWorkspace = (maps) => {
     if (!Array.isArray(maps) || maps.length === 0) {
       throw new Error('インポートできるマップがありません');
@@ -605,6 +620,7 @@ async function boot(app) {
     persistWorkspace();
     renderMapList(workspace);
     loadMapIntoCanvas(maps[0].id);
+    closeSidebar();
     queueSync();
     setStatus(`${maps.length}件をインポートしました`, 'ok');
   };
@@ -691,6 +707,7 @@ async function boot(app) {
     workspace.currentMapId = nextMap.id;
     persistWorkspace();
     renderMapList(workspace);
+    closeSidebar();
 
     if (pendingRenderEndHandler) {
       mindMap.off('node_tree_render_end', pendingRenderEndHandler);
@@ -735,6 +752,9 @@ async function boot(app) {
   nodeTextInput?.addEventListener('focus', () => {
     mindMap.renderer?.textEdit?.hideEditTextBox?.();
   });
+
+  toggleSidebarBtn?.addEventListener('click', toggleSidebar);
+  sidebarBackdrop?.addEventListener('click', closeSidebar);
 
   importMapBtn?.addEventListener('click', () => {
     importMapInput?.click();
