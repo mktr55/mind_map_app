@@ -87,26 +87,6 @@ async function fetchViewer() {
   return githubFetch('/user');
 }
 
-async function ensurePrivateRepo(owner, repo) {
-  try {
-    return await githubFetch(`/repos/${owner}/${repo}`);
-  } catch (error) {
-    if (!String(error.message).includes('Not Found')) {
-      throw error;
-    }
-  }
-
-  return githubFetch('/user/repos', {
-    method: 'POST',
-    body: {
-      name: repo,
-      private: true,
-      auto_init: true,
-      description: 'MindFlow mobile sync data',
-    },
-  });
-}
-
 function encodeContent(value) {
   return btoa(unescape(encodeURIComponent(JSON.stringify(value, null, 2))));
 }
@@ -156,8 +136,8 @@ function renderTokenScreen(app) {
           <input id="tokenInput" type="password" placeholder="github_pat_..." autocomplete="off" />
         </label>
         <p class="hint">
-          必要権限: classic token なら <code>repo</code>。fine-grained token なら
-          対象 private repo への Contents Read/Write と Metadata Read。
+          必要権限: <code>mktr55/mindflow-data</code> に対する fine-grained token の
+          <code>Contents: Read and write</code> と <code>Metadata: Read</code>。
         </p>
         <button id="tokenSubmit" class="primary-btn">接続する</button>
         <p id="tokenError" class="error-text"></p>
@@ -227,7 +207,14 @@ async function boot(app) {
   const user = await fetchViewer();
   writeJson(STORAGE_KEYS.user, user);
   writeJson(STORAGE_KEYS.repo, { owner: user.login, repo: DEFAULT_REPO });
-  await ensurePrivateRepo(user.login, DEFAULT_REPO);
+
+  try {
+    await githubFetch(`/repos/${user.login}/${DEFAULT_REPO}`);
+  } catch (error) {
+    throw new Error(
+      `保存先 ${user.login}/${DEFAULT_REPO} にアクセスできません。fine-grained token の対象 repo と権限を確認してください。`,
+    );
+  }
 
   renderAppShell(app, user);
 
