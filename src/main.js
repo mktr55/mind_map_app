@@ -11,6 +11,7 @@ const STORAGE_KEYS = {
   sidebarCollapsed: 'mindflow.sidebarCollapsed',
   headerCollapsed: 'mindflow.headerCollapsed',
   toolbarCollapsed: 'mindflow.toolbarCollapsed',
+  statusCollapsed: 'mindflow.statusCollapsed',
 };
 
 const API_BASE = 'https://api.github.com';
@@ -378,7 +379,12 @@ function renderAppShell(app, user) {
       <div class="floating-status">
         <span id="statusPill" class="status-pill" data-tone="muted">ローカル保存済み</span>
         <button id="deleteMapBtn" class="danger-btn small-btn" type="button">このマップを削除</button>
+        <button id="collapseStatusBtn" class="icon-btn status-toggle-btn" type="button" aria-label="ステータスを折り畳む">〉</button>
       </div>
+
+      <button id="expandStatusBtn" class="panel-handle panel-handle-status" type="button" aria-label="ステータスを開く">
+        <span>Status</span><strong>〈</strong>
+      </button>
     </main>
   `;
 }
@@ -577,6 +583,7 @@ async function boot(app) {
       sidebar: STORAGE_KEYS.sidebarCollapsed,
       header: STORAGE_KEYS.headerCollapsed,
       toolbar: STORAGE_KEYS.toolbarCollapsed,
+      status: STORAGE_KEYS.statusCollapsed,
     };
     const key = keyByKind[kind];
     document.body.classList.toggle(`${kind}-collapsed`, collapsed);
@@ -588,6 +595,7 @@ async function boot(app) {
     setLayoutState('sidebar', localStorage.getItem(STORAGE_KEYS.sidebarCollapsed) === 'true');
     setLayoutState('header', localStorage.getItem(STORAGE_KEYS.headerCollapsed) === 'true');
     setLayoutState('toolbar', localStorage.getItem(STORAGE_KEYS.toolbarCollapsed) === 'true');
+    setLayoutState('status', localStorage.getItem(STORAGE_KEYS.statusCollapsed) === 'true');
   }
 
   function loadMapIntoCanvas(mapId) {
@@ -658,6 +666,8 @@ async function boot(app) {
   document.getElementById('expandTopbarBtn').addEventListener('click', () => setLayoutState('header', false));
   document.getElementById('collapseToolbarBtn').addEventListener('click', () => setLayoutState('toolbar', true));
   document.getElementById('expandToolbarBtn').addEventListener('click', () => setLayoutState('toolbar', false));
+  document.getElementById('collapseStatusBtn').addEventListener('click', () => setLayoutState('status', true));
+  document.getElementById('expandStatusBtn').addEventListener('click', () => setLayoutState('status', false));
 
   document.getElementById('mapList').addEventListener('click', (event) => {
     const button = event.target.closest('[data-map-id]');
