@@ -542,7 +542,6 @@ async function boot(app) {
     saveCurrentMapFromCanvas();
     const map = createBlankMap(name.trim() || `マインドマップ ${workspace.maps.length + 1}`);
     workspace.maps.unshift(map);
-    workspace.currentMapId = map.id;
     persistWorkspace();
     renderMapList(workspace);
     loadMapIntoCanvas(map.id);
