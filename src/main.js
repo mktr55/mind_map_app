@@ -401,6 +401,7 @@ async function boot(app) {
   let suppressSave = false;
   let selectedNode = null;
   let isUpdatingNodeInput = false;
+  let pendingRenderEndHandler = null;
 
   const mindMap = new MindMap({
     el: document.getElementById('mindMapMount'),
@@ -478,6 +479,16 @@ async function boot(app) {
     }, 1200);
   };
 
+  const focusLoadedMap = () => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        mindMap.view.fit();
+        selectRootNode(mindMap);
+        updateNodeInput(mindMap.renderer?.root);
+      });
+    });
+  };
+
   const loadMapIntoCanvas = (mapId) => {
     const nextMap = workspace.maps.find((map) => map.id === mapId);
     if (!nextMap) {
@@ -490,17 +501,25 @@ async function boot(app) {
     persistWorkspace();
     renderMapList(workspace);
 
+    if (pendingRenderEndHandler) {
+      mindMap.off('node_tree_render_end', pendingRenderEndHandler);
+    }
+
+    const handleRenderEnd = () => {
+      mindMap.off('node_tree_render_end', handleRenderEnd);
+      pendingRenderEndHandler = null;
+      focusLoadedMap();
+    };
+
+    pendingRenderEndHandler = handleRenderEnd;
+    mindMap.on('node_tree_render_end', handleRenderEnd);
     suppressSave = true;
     mindMap.setFullData(buildMindMapData(nextMap));
     suppressSave = false;
-    mindMap.view.fit();
-    window.setTimeout(() => selectRootNode(mindMap), 0);
-    window.setTimeout(() => updateNodeInput(mindMap.renderer?.root), 0);
   };
 
   renderMapList(workspace);
-  window.setTimeout(() => selectRootNode(mindMap), 0);
-  window.setTimeout(() => updateNodeInput(mindMap.renderer?.root), 0);
+  focusLoadedMap();
 
   mindMap.on('data_change', queueSync);
   mindMap.on('node_active', (node, activeNodeList = []) => {
