@@ -10,6 +10,7 @@ const STORAGE_KEYS = {
   workspace: 'mindflow.workspace',
   sidebarCollapsed: 'mindflow.sidebarCollapsed',
   headerCollapsed: 'mindflow.headerCollapsed',
+  toolbarCollapsed: 'mindflow.toolbarCollapsed',
 };
 
 const API_BASE = 'https://api.github.com';
@@ -362,7 +363,12 @@ function renderAppShell(app, user) {
         <button id="addSiblingBtn" class="tool-btn" type="button">兄弟</button>
         <button id="deleteNodeBtn" class="tool-btn danger" type="button">削除</button>
         <button id="fitBtn" class="tool-btn" type="button">全体</button>
+        <button id="collapseToolbarBtn" class="icon-btn toolbar-toggle-btn" type="button" aria-label="操作ツールを折り畳む">〉</button>
       </section>
+
+      <button id="expandToolbarBtn" class="panel-handle panel-handle-toolbar" type="button" aria-label="操作ツールを開く">
+        <span>Tools</span><strong>〈</strong>
+      </button>
 
       <section class="floating-node-editor">
         <label for="nodeTextInput">選択ノード</label>
@@ -567,7 +573,12 @@ async function boot(app) {
   }
 
   function setLayoutState(kind, collapsed) {
-    const key = kind === 'sidebar' ? STORAGE_KEYS.sidebarCollapsed : STORAGE_KEYS.headerCollapsed;
+    const keyByKind = {
+      sidebar: STORAGE_KEYS.sidebarCollapsed,
+      header: STORAGE_KEYS.headerCollapsed,
+      toolbar: STORAGE_KEYS.toolbarCollapsed,
+    };
+    const key = keyByKind[kind];
     document.body.classList.toggle(`${kind}-collapsed`, collapsed);
     localStorage.setItem(key, collapsed ? 'true' : 'false');
     refitCanvas();
@@ -576,6 +587,7 @@ async function boot(app) {
   function updateLayoutState() {
     setLayoutState('sidebar', localStorage.getItem(STORAGE_KEYS.sidebarCollapsed) === 'true');
     setLayoutState('header', localStorage.getItem(STORAGE_KEYS.headerCollapsed) === 'true');
+    setLayoutState('toolbar', localStorage.getItem(STORAGE_KEYS.toolbarCollapsed) === 'true');
   }
 
   function loadMapIntoCanvas(mapId) {
@@ -644,6 +656,8 @@ async function boot(app) {
   document.getElementById('expandSidebarBtn').addEventListener('click', () => setLayoutState('sidebar', false));
   document.getElementById('collapseTopbarBtn').addEventListener('click', () => setLayoutState('header', true));
   document.getElementById('expandTopbarBtn').addEventListener('click', () => setLayoutState('header', false));
+  document.getElementById('collapseToolbarBtn').addEventListener('click', () => setLayoutState('toolbar', true));
+  document.getElementById('expandToolbarBtn').addEventListener('click', () => setLayoutState('toolbar', false));
 
   document.getElementById('mapList').addEventListener('click', (event) => {
     const button = event.target.closest('[data-map-id]');
