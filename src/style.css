@@ -132,6 +132,11 @@ button {
   gap: 12px;
 }
 
+.sidebar-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .auth-card {
   width: min(560px, calc(100vw - 24px));
   padding: 28px;
@@ -381,6 +386,11 @@ code {
 
   .sidebar-head {
     gap: 8px;
+  }
+
+  .sidebar-actions {
+    width: 100%;
+    justify-content: flex-end;
   }
 
   .sidebar-head h2,

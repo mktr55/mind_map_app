@@ -288,9 +288,13 @@ function renderAppShell(app, user) {
               <p class="section-label">Maps</p>
               <h2>保存済み一覧</h2>
             </div>
-            <button id="newMapBtn" class="primary-btn small-btn">新規</button>
+            <div class="sidebar-actions">
+              <button id="importMapBtn" class="small-btn">インポート</button>
+              <button id="newMapBtn" class="primary-btn small-btn">新規</button>
+            </div>
           </div>
           <div id="mapList" class="map-list"></div>
+          <input id="importMapInput" type="file" accept=".opml,.xml,.mm,.json" hidden />
         </aside>
       <section class="editor panel">
         <div class="toolbar">
@@ -383,6 +387,153 @@ function readMindMapSnapshot(mindMap, fallbackLayout) {
   };
 }
 
+function createNodeData(text, prefix = 'node') {
+  const ts = Date.now();
+  return {
+    text: text?.trim() || '無題',
+    expand: true,
+    uid: `${prefix}-${ts}-${Math.random().toString(36).slice(2, 8)}`,
+  };
+}
+
+function createImportedNode(text, children = [], prefix = 'import') {
+  return {
+    data: createNodeData(text, prefix),
+    children,
+  };
+}
+
+function parseXmlDocument(text) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(text, 'text/xml');
+  const parserError = doc.querySelector('parsererror');
+  if (parserError) {
+    throw new Error('XML を読み取れませんでした');
+  }
+  return doc;
+}
+
+function convertOpmlOutline(outlineEl) {
+  const children = Array.from(outlineEl.children)
+    .filter((child) => child.tagName.toLowerCase() === 'outline')
+    .map((child) => convertOpmlOutline(child));
+  return createImportedNode(outlineEl.getAttribute('text') || '無題', children, 'opml');
+}
+
+function parseOpmlMap(text, fallbackTitle) {
+  const doc = parseXmlDocument(text);
+  if (doc.documentElement.tagName.toLowerCase() !== 'opml') {
+    throw new Error('OPML 形式ではありません');
+  }
+
+  const body = doc.querySelector('body');
+  const outlines = body
+    ? Array.from(body.children).filter((child) => child.tagName.toLowerCase() === 'outline')
+    : [];
+  if (outlines.length === 0) {
+    throw new Error('OPML にノードがありません');
+  }
+
+  if (outlines.length === 1) {
+    const root = convertOpmlOutline(outlines[0]);
+    return {
+      id: `map-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      title: root.data.text || fallbackTitle || 'MindMeister import',
+      updatedAt: new Date().toISOString(),
+      root,
+      layout: 'logicalStructure',
+    };
+  }
+
+  const title =
+    doc.querySelector('head > title')?.textContent?.trim() ||
+    fallbackTitle ||
+    'MindMeister import';
+
+  return {
+    id: `map-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    title,
+    updatedAt: new Date().toISOString(),
+    root: createImportedNode(title, outlines.map((outline) => convertOpmlOutline(outline)), 'opml-root'),
+    layout: 'logicalStructure',
+  };
+}
+
+function readFreeMindNodeLabel(nodeEl) {
+  const richContent = Array.from(nodeEl.children).find(
+    (child) => child.tagName?.toLowerCase() === 'richcontent' && child.getAttribute('TYPE') === 'NODE',
+  );
+  return (
+    nodeEl.getAttribute('TEXT') ||
+    nodeEl.getAttribute('text') ||
+    richContent?.textContent?.trim() ||
+    '無題'
+  );
+}
+
+function convertFreeMindNode(nodeEl) {
+  const children = Array.from(nodeEl.children)
+    .filter((child) => child.tagName.toLowerCase() === 'node')
+    .map((child) => convertFreeMindNode(child));
+  return createImportedNode(readFreeMindNodeLabel(nodeEl), children, 'mm');
+}
+
+function parseFreeMindMap(text, fallbackTitle) {
+  const doc = parseXmlDocument(text);
+  if (doc.documentElement.tagName.toLowerCase() !== 'map') {
+    throw new Error('FreeMind 形式ではありません');
+  }
+
+  const rootEl = doc.querySelector('map > node');
+  if (!rootEl) {
+    throw new Error('マップのルートノードがありません');
+  }
+
+  const root = convertFreeMindNode(rootEl);
+  return {
+    id: `map-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    title: root.data.text || fallbackTitle || 'FreeMind import',
+    updatedAt: new Date().toISOString(),
+    root,
+    layout: 'logicalStructure',
+  };
+}
+
+function parseWorkspaceImport(text) {
+  const parsed = normalizeWorkspace(JSON.parse(text));
+  return parsed.maps.map((map, index) => ({
+    ...map,
+    id: `map-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
+    updatedAt: new Date(Date.now() - index).toISOString(),
+  }));
+}
+
+function parseImportedMaps(fileName, text) {
+  const lowerName = fileName.toLowerCase();
+  if (lowerName.endsWith('.json')) {
+    return parseWorkspaceImport(text);
+  }
+
+  if (lowerName.endsWith('.mm')) {
+    return [parseFreeMindMap(text, fileName.replace(/\.[^.]+$/, ''))];
+  }
+
+  if (lowerName.endsWith('.opml')) {
+    return [parseOpmlMap(text, fileName.replace(/\.[^.]+$/, ''))];
+  }
+
+  const xmlDoc = parseXmlDocument(text);
+  const rootTag = xmlDoc.documentElement.tagName.toLowerCase();
+  if (rootTag === 'opml') {
+    return [parseOpmlMap(text, fileName.replace(/\.[^.]+$/, ''))];
+  }
+  if (rootTag === 'map') {
+    return [parseFreeMindMap(text, fileName.replace(/\.[^.]+$/, ''))];
+  }
+
+  throw new Error('対応形式は OPML / FreeMind(.mm) / MindFlow JSON です');
+}
+
 async function boot(app) {
   const user = await fetchViewer();
   writeJson(STORAGE_KEYS.user, user);
@@ -415,6 +566,8 @@ async function boot(app) {
   });
 
   const nodeTextInput = document.getElementById('nodeTextInput');
+  const importMapBtn = document.getElementById('importMapBtn');
+  const importMapInput = document.getElementById('importMapInput');
 
   const isTextEditing = () => Boolean(mindMap.renderer?.textEdit?.isShowTextEdit?.());
 
@@ -434,6 +587,38 @@ async function boot(app) {
   const persistWorkspace = () => {
     workspace.updatedAt = new Date().toISOString();
     writeJson(STORAGE_KEYS.workspace, workspace);
+  };
+
+  const importMapsIntoWorkspace = (maps) => {
+    if (!Array.isArray(maps) || maps.length === 0) {
+      throw new Error('インポートできるマップがありません');
+    }
+
+    saveCurrentMapFromCanvas();
+    workspace.maps.unshift(...maps);
+    persistWorkspace();
+    renderMapList(workspace);
+    loadMapIntoCanvas(maps[0].id);
+    queueSync();
+    setStatus(`${maps.length}件をインポートしました`, 'ok');
+  };
+
+  const importMapFile = async (file) => {
+    if (!file) {
+      return;
+    }
+
+    try {
+      const importedMaps = parseImportedMaps(file.name, await file.text());
+      importMapsIntoWorkspace(importedMaps);
+    } catch (error) {
+      setStatus(`インポート失敗: ${error.message}`, 'error');
+      window.alert(`インポートできませんでした。\n${error.message}`);
+    } finally {
+      if (importMapInput) {
+        importMapInput.value = '';
+      }
+    }
   };
 
   const saveCurrentMapFromCanvas = ({ renderList = true } = {}) => {
@@ -543,6 +728,15 @@ async function boot(app) {
 
   nodeTextInput?.addEventListener('focus', () => {
     mindMap.renderer?.textEdit?.hideEditTextBox?.();
+  });
+
+  importMapBtn?.addEventListener('click', () => {
+    importMapInput?.click();
+  });
+
+  importMapInput?.addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
+    await importMapFile(file);
   });
 
   document.getElementById('mapList').addEventListener('click', (event) => {
