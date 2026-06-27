@@ -67,6 +67,15 @@ function writeJson(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+function escapeHtml(value = '') {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 function getToken() {
   return localStorage.getItem(STORAGE_KEYS.token) || '';
 }
@@ -283,20 +292,24 @@ function renderAppShell(app, user) {
           </div>
           <div id="mapList" class="map-list"></div>
         </aside>
-        <section class="editor panel">
-          <div class="toolbar">
-            <button id="renameMapBtn">名前変更</button>
-            <button id="addChildBtn">子ノード</button>
-            <button id="addSiblingBtn">兄弟ノード</button>
-            <button id="deleteNodeBtn">ノード削除</button>
-            <button id="fitBtn">全体表示</button>
-            <button id="syncBtn" class="primary-btn">今すぐ同期</button>
-          </div>
-          <p class="inline-hint">左でマップを切り替え、中央ノードをタップしてから編集できます。</p>
-          <div class="meta-row">
-            <span id="statusPill" class="status-pill" data-tone="muted">未同期</span>
-            <button id="deleteMapBtn" class="danger-btn small-btn">このマップを削除</button>
-          </div>
+      <section class="editor panel">
+        <div class="toolbar">
+          <button id="renameMapBtn">名前変更</button>
+          <button id="addChildBtn">子ノード</button>
+          <button id="addSiblingBtn">兄弟ノード</button>
+          <button id="deleteNodeBtn">ノード削除</button>
+          <button id="fitBtn">全体表示</button>
+          <button id="syncBtn" class="primary-btn">今すぐ同期</button>
+        </div>
+        <div class="node-editor-strip">
+          <label for="nodeTextInput">選択ノード</label>
+          <input id="nodeTextInput" type="text" placeholder="ノードを選択" autocomplete="off" disabled />
+        </div>
+        <p class="inline-hint">ノードを選んで入力欄を書き換えるか、ノードをダブルタップして直接編集できます。</p>
+        <div class="meta-row">
+          <span id="statusPill" class="status-pill" data-tone="muted">未同期</span>
+          <button id="deleteMapBtn" class="danger-btn small-btn">このマップを削除</button>
+        </div>
           <div id="mindMapMount" class="mindmap-frame"></div>
         </section>
       </section>
@@ -327,13 +340,13 @@ function renderMapList(workspace) {
   const listEl = document.getElementById('mapList');
   listEl.innerHTML = workspace.maps
     .slice()
-    .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
-    .map((map) => `
-      <button class="map-card ${map.id === workspace.currentMapId ? 'active' : ''}" data-map-id="${map.id}">
-        <span class="map-card-title">${map.title}</span>
-        <span class="map-card-time">${formatUpdatedAt(map.updatedAt)}</span>
-      </button>
-    `)
+      .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+      .map((map) => `
+        <button class="map-card ${map.id === workspace.currentMapId ? 'active' : ''}" data-map-id="${map.id}">
+          <span class="map-card-title">${escapeHtml(map.title)}</span>
+          <span class="map-card-time">${formatUpdatedAt(map.updatedAt)}</span>
+        </button>
+      `)
     .join('');
 }
 
@@ -386,21 +399,43 @@ async function boot(app) {
   let currentSha = remoteWorkspace?.sha || null;
   let syncTimer = null;
   let suppressSave = false;
+  let selectedNode = null;
+  let isUpdatingNodeInput = false;
 
   const mindMap = new MindMap({
     el: document.getElementById('mindMapMount'),
     data: buildMindMapData(getCurrentMap(workspace)),
     fit: true,
     enableAutoEnterTextEditWhenKeydown: true,
+    openRealtimeRenderOnNodeTextEdit: true,
+    defaultInsertSecondLevelNodeText: '新しいトピック',
+    defaultInsertBelowSecondLevelNodeText: '新しいトピック',
     nodeTextEditZIndex: 20,
   });
+
+  const nodeTextInput = document.getElementById('nodeTextInput');
+
+  const isTextEditing = () => Boolean(mindMap.renderer?.textEdit?.isShowTextEdit?.());
+
+  const updateNodeInput = (node = selectedNode) => {
+    if (!nodeTextInput) {
+      return;
+    }
+
+    selectedNode = node || null;
+    isUpdatingNodeInput = true;
+    nodeTextInput.disabled = !selectedNode;
+    nodeTextInput.value = selectedNode?.getData?.('text') || '';
+    nodeTextInput.placeholder = selectedNode ? '文字を入力' : 'ノードを選択';
+    isUpdatingNodeInput = false;
+  };
 
   const persistWorkspace = () => {
     workspace.updatedAt = new Date().toISOString();
     writeJson(STORAGE_KEYS.workspace, workspace);
   };
 
-  const saveCurrentMapFromCanvas = () => {
+  const saveCurrentMapFromCanvas = ({ renderList = true } = {}) => {
     if (suppressSave) {
       return;
     }
@@ -416,10 +451,13 @@ async function boot(app) {
     current.title = current.root?.data?.text?.trim() || current.title || '無題';
     current.updatedAt = new Date().toISOString();
     persistWorkspace();
-    renderMapList(workspace);
+    if (renderList) {
+      renderMapList(workspace);
+    }
   };
 
   const syncNow = async () => {
+    mindMap.renderer?.textEdit?.hideEditTextBox?.();
     saveCurrentMapFromCanvas();
     setStatus('同期中…', 'busy');
     const result = await writeRemoteWorkspace(user.login, workspace, currentSha);
@@ -428,7 +466,7 @@ async function boot(app) {
   };
 
   const queueSync = () => {
-    saveCurrentMapFromCanvas();
+    saveCurrentMapFromCanvas({ renderList: !isTextEditing() });
     setStatus('ローカル保存済み', 'muted');
     window.clearTimeout(syncTimer);
     syncTimer = window.setTimeout(async () => {
@@ -446,6 +484,7 @@ async function boot(app) {
       return;
     }
 
+    mindMap.renderer?.textEdit?.hideEditTextBox?.();
     saveCurrentMapFromCanvas();
     workspace.currentMapId = nextMap.id;
     persistWorkspace();
@@ -456,12 +495,36 @@ async function boot(app) {
     suppressSave = false;
     mindMap.view.fit();
     window.setTimeout(() => selectRootNode(mindMap), 0);
+    window.setTimeout(() => updateNodeInput(mindMap.renderer?.root), 0);
   };
 
   renderMapList(workspace);
   window.setTimeout(() => selectRootNode(mindMap), 0);
+  window.setTimeout(() => updateNodeInput(mindMap.renderer?.root), 0);
 
   mindMap.on('data_change', queueSync);
+  mindMap.on('node_active', (node, activeNodeList = []) => {
+    updateNodeInput(node || activeNodeList[0] || null);
+  });
+  mindMap.on('node_text_edit_change', ({ node, text }) => {
+    if (node === selectedNode && nodeTextInput && document.activeElement !== nodeTextInput) {
+      isUpdatingNodeInput = true;
+      nodeTextInput.value = text || '';
+      isUpdatingNodeInput = false;
+    }
+  });
+
+  nodeTextInput?.addEventListener('input', () => {
+    if (!selectedNode || isUpdatingNodeInput) {
+      return;
+    }
+
+    selectedNode.setText(nodeTextInput.value);
+  });
+
+  nodeTextInput?.addEventListener('focus', () => {
+    mindMap.renderer?.textEdit?.hideEditTextBox?.();
+  });
 
   document.getElementById('mapList').addEventListener('click', (event) => {
     const button = event.target.closest('[data-map-id]');
