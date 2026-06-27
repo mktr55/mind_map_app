@@ -12,12 +12,12 @@ const API_BASE = 'https://api.github.com';
 const DEFAULT_REPO = 'mindflow-data';
 const DEFAULT_PATH = 'mindflow/workspace.json';
 
-function createNode(text, ts, suffix) {
+function createNode(text, ts, prefix) {
   return {
     data: {
       text,
       expand: true,
-      uid: `${suffix}-${ts}-${Math.random().toString(36).slice(2, 8)}`,
+      uid: `${prefix}-${ts}-${Math.random().toString(36).slice(2, 8)}`,
     },
     children: [],
   };
@@ -81,10 +81,10 @@ function clearSession() {
 }
 
 function setStatus(text, tone = 'muted') {
-  const el = document.getElementById('statusPill');
-  if (el) {
-    el.textContent = text;
-    el.dataset.tone = tone;
+  const statusEl = document.getElementById('statusPill');
+  if (statusEl) {
+    statusEl.textContent = text;
+    statusEl.dataset.tone = tone;
   }
   writeJson(STORAGE_KEYS.status, { text, tone });
 }
@@ -133,13 +133,15 @@ function normalizeWorkspace(input) {
   }
 
   if (Array.isArray(input.maps) && input.maps.length > 0) {
-    const maps = input.maps.map((map, index) => ({
-      id: map.id || `map-${Date.now()}-${index}`,
-      title: map.title || map.root?.data?.text || `マインドマップ ${index + 1}`,
-      updatedAt: map.updatedAt || new Date().toISOString(),
-      root: map.root,
-      layout: map.layout || 'logicalStructure',
-    })).filter((map) => map.root);
+    const maps = input.maps
+      .map((map, index) => ({
+        id: map.id || `map-${Date.now()}-${index}`,
+        title: map.title || map.root?.data?.text || `マインドマップ ${index + 1}`,
+        updatedAt: map.updatedAt || new Date().toISOString(),
+        root: map.root,
+        layout: map.layout || 'logicalStructure',
+      }))
+      .filter((map) => map.root);
 
     if (maps.length === 0) {
       return createDefaultWorkspace();
@@ -153,7 +155,7 @@ function normalizeWorkspace(input) {
   }
 
   if (input.root) {
-    const single = {
+    const map = {
       id: input.id || `legacy-${Date.now()}`,
       title: input.title || input.root?.data?.text || 'MindFlow',
       updatedAt: input.updatedAt || new Date().toISOString(),
@@ -161,9 +163,9 @@ function normalizeWorkspace(input) {
       layout: input.layout || 'logicalStructure',
     };
     return {
-      currentMapId: single.id,
-      maps: [single],
-      updatedAt: single.updatedAt,
+      currentMapId: map.id,
+      maps: [map],
+      updatedAt: map.updatedAt,
     };
   }
 
@@ -244,15 +246,15 @@ function renderTokenScreen(app) {
   `;
 
   const input = document.getElementById('tokenInput');
-  const error = document.getElementById('tokenError');
+  const errorEl = document.getElementById('tokenError');
   document.getElementById('tokenSubmit').addEventListener('click', async () => {
-    error.textContent = '';
+    errorEl.textContent = '';
     setToken(input.value);
     try {
       await boot(app);
-    } catch (err) {
+    } catch (error) {
       clearSession();
-      error.textContent = err.message;
+      errorEl.textContent = error.message;
     }
   });
 }
@@ -300,6 +302,7 @@ function renderAppShell(app, user) {
       </section>
     </main>
   `;
+
   restoreStatus();
 }
 
@@ -307,6 +310,7 @@ function formatUpdatedAt(value) {
   if (!value) {
     return '';
   }
+
   try {
     return new Date(value).toLocaleString('ja-JP', {
       month: 'numeric',
@@ -320,8 +324,8 @@ function formatUpdatedAt(value) {
 }
 
 function renderMapList(workspace) {
-  const list = document.getElementById('mapList');
-  list.innerHTML = workspace.maps
+  const listEl = document.getElementById('mapList');
+  listEl.innerHTML = workspace.maps
     .slice()
     .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
     .map((map) => `
@@ -344,6 +348,28 @@ function selectRootNode(mindMap) {
   }
 }
 
+function buildMindMapData(map) {
+  return {
+    root: map.root,
+    layout: map.layout || 'logicalStructure',
+  };
+}
+
+function readMindMapSnapshot(mindMap, fallbackLayout) {
+  const full = mindMap.getData();
+  if (full?.root) {
+    return {
+      root: full.root,
+      layout: full.layout || fallbackLayout || 'logicalStructure',
+    };
+  }
+
+  return {
+    root: full,
+    layout: fallbackLayout || 'logicalStructure',
+  };
+}
+
 async function boot(app) {
   const user = await fetchViewer();
   writeJson(STORAGE_KEYS.user, user);
@@ -353,18 +379,17 @@ async function boot(app) {
 
   const localWorkspace = normalizeWorkspace(readJson(STORAGE_KEYS.workspace, createDefaultWorkspace()));
   const remoteWorkspace = await readRemoteWorkspace(user.login);
-  let workspace = remoteWorkspace?.content || localWorkspace;
+  const workspace = remoteWorkspace?.content || localWorkspace;
+
   writeJson(STORAGE_KEYS.workspace, workspace);
 
   let currentSha = remoteWorkspace?.sha || null;
   let syncTimer = null;
   let suppressSave = false;
 
-  const mount = document.getElementById('mindMapMount');
   const mindMap = new MindMap({
-    el: mount,
-    data: getCurrentMap(workspace).root,
-    layout: getCurrentMap(workspace).layout || 'logicalStructure',
+    el: document.getElementById('mindMapMount'),
+    data: buildMindMapData(getCurrentMap(workspace)),
     fit: true,
     enableAutoEnterTextEditWhenKeydown: true,
     nodeTextEditZIndex: 20,
@@ -380,16 +405,16 @@ async function boot(app) {
       return;
     }
 
-    const active = getCurrentMap(workspace);
-    if (!active) {
+    const current = getCurrentMap(workspace);
+    if (!current) {
       return;
     }
 
-    const full = mindMap.getData();
-    active.root = full.root || full;
-    active.layout = full.layout || active.layout || 'logicalStructure';
-    active.title = active.root?.data?.text?.trim() || active.title || '無題';
-    active.updatedAt = new Date().toISOString();
+    const snapshot = readMindMapSnapshot(mindMap, current.layout);
+    current.root = snapshot.root;
+    current.layout = snapshot.layout;
+    current.title = current.root?.data?.text?.trim() || current.title || '無題';
+    current.updatedAt = new Date().toISOString();
     persistWorkspace();
     renderMapList(workspace);
   };
@@ -427,8 +452,7 @@ async function boot(app) {
     renderMapList(workspace);
 
     suppressSave = true;
-    mindMap.setData(nextMap.root);
-    mindMap.setLayout(nextMap.layout || 'logicalStructure');
+    mindMap.setFullData(buildMindMapData(nextMap));
     suppressSave = false;
     mindMap.view.fit();
     window.setTimeout(() => selectRootNode(mindMap), 0);
@@ -441,19 +465,19 @@ async function boot(app) {
 
   document.getElementById('mapList').addEventListener('click', (event) => {
     const button = event.target.closest('[data-map-id]');
-    if (!button) {
-      return;
+    if (button) {
+      loadMapIntoCanvas(button.dataset.mapId);
     }
-    loadMapIntoCanvas(button.dataset.mapId);
   });
 
   document.getElementById('newMapBtn').addEventListener('click', () => {
-    const title = window.prompt('新しいマインドマップ名', `マインドマップ ${workspace.maps.length + 1}`);
-    if (!title) {
+    const name = window.prompt('新しいマインドマップ名', `マインドマップ ${workspace.maps.length + 1}`);
+    if (!name) {
       return;
     }
+
     saveCurrentMapFromCanvas();
-    const map = createBlankMap(title.trim() || `マインドマップ ${workspace.maps.length + 1}`);
+    const map = createBlankMap(name.trim() || `マインドマップ ${workspace.maps.length + 1}`);
     workspace.maps.unshift(map);
     workspace.currentMapId = map.id;
     persistWorkspace();
@@ -464,17 +488,19 @@ async function boot(app) {
 
   document.getElementById('renameMapBtn').addEventListener('click', () => {
     const current = getCurrentMap(workspace);
-    const title = window.prompt('マップ名を変更', current.title);
-    if (!title) {
+    const name = window.prompt('マップ名を変更', current.title);
+    if (!name) {
       return;
     }
-    current.title = title.trim() || current.title;
+
+    current.title = name.trim() || current.title;
     current.root.data.text = current.title;
     current.updatedAt = new Date().toISOString();
     persistWorkspace();
     renderMapList(workspace);
+
     suppressSave = true;
-    mindMap.setData(current.root);
+    mindMap.setFullData(buildMindMapData(current));
     suppressSave = false;
     queueSync();
   });
@@ -484,11 +510,12 @@ async function boot(app) {
       window.alert('最後の1枚は削除できません。');
       return;
     }
+
     const current = getCurrentMap(workspace);
-    const confirmed = window.confirm(`「${current.title}」を削除しますか？`);
-    if (!confirmed) {
+    if (!window.confirm(`「${current.title}」を削除しますか？`)) {
       return;
     }
+
     workspace.maps = workspace.maps.filter((map) => map.id !== current.id);
     workspace.currentMapId = workspace.maps[0].id;
     persistWorkspace();
