@@ -98,7 +98,8 @@ async function readRemoteMap(owner, repo) {
       content: decodeContent(file.content.replace(/\n/g, '')),
     };
   } catch (error) {
-    if (String(error.message).includes('Not Found')) {
+    const message = String(error.message);
+    if (message.includes('Not Found') || message.includes('This repository is empty.')) {
       return null;
     }
     throw error;
