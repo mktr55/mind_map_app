@@ -799,7 +799,12 @@ const rootNode = getRootNode();
     workspace.currentMapId = map.id;
     persistWorkspace();
     renderMapList(workspace);
-    loadMapIntoCanvas(map.id);
+    suppressSave = true;
+    mindMap.setFullData(buildMindMapData(map));
+    suppressSave = false;
+    updateSelectedNode(null);
+    refitCanvas();
+    refreshAssociativeLines();
     queueSync();
   });
 
