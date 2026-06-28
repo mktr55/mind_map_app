@@ -1,8 +1,10 @@
 import MindMap from 'simple-mind-map';
 import TouchEvent from 'simple-mind-map/src/plugins/TouchEvent.js';
+import AssociativeLine from 'simple-mind-map/src/plugins/AssociativeLine.js';
 import './style.css';
 
 MindMap.usePlugin(TouchEvent);
+MindMap.usePlugin(AssociativeLine);
 
 const STORAGE_KEYS = {
   token: 'mindflow.githubToken',
@@ -17,6 +19,12 @@ const API_BASE = 'https://api.github.com';
 const DEFAULT_REPO = 'mindflow-data';
 const DEFAULT_PATH = 'mindflow/workspace.json';
 const SYNC_DEBOUNCE_MS = 1200;
+const IS_LOCAL_DEV_MODE = import.meta.env.DEV && !getToken();
+
+function canUseMapShortcut(target) {
+  const el = target instanceof Element ? target : null;
+  return Boolean(el && (el === document.body || el.closest('#mindMapMount') || el.closest('.smm-node-edit-wrap')));
+}
 
 function uid(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -96,6 +104,9 @@ function decodeContent(value) {
 
 function normalizeNode(node, fallbackText = '無題') {
   if (!node || typeof node !== 'object') return createNode(fallbackText);
+  if (node.root && typeof node.root === 'object') {
+    node = node.root;
+  }
   const data = node.data && typeof node.data === 'object' ? node.data : {};
   const text = data.text || node.text || fallbackText;
   return {
@@ -168,6 +179,11 @@ function buildMindMapData(map) {
         backgroundColor: '#40464f',
         lineColor: '#8597a7',
         lineWidth: 2,
+        associativeLineWidth: 3,
+        associativeLineColor: '#22c55e',
+        associativeLineActiveWidth: 8,
+        associativeLineActiveColor: '#16a34a',
+        associativeLineDasharray: '0',
         root: {
           fillColor: '#1c8bff',
           color: '#ffffff',
@@ -368,6 +384,7 @@ function renderAppShell(app, user) {
         <button id="renameMapBtn" class="tool-btn" type="button">名前</button>
         <button id="addChildBtn" class="tool-btn" type="button">子</button>
         <button id="addSiblingBtn" class="tool-btn" type="button">兄弟</button>
+        <button id="connectBtn" class="tool-btn connect-btn" type="button">関係線</button>
         <button id="deleteNodeBtn" class="tool-btn danger" type="button">削除</button>
         <button id="fitBtn" class="tool-btn" type="button">全体</button>
         <button id="collapseToolbarBtn" class="icon-btn toolbar-toggle-btn" type="button" aria-label="操作ツールを折り畳む">〉</button>
@@ -462,13 +479,13 @@ function parseImportedMaps(fileName, text) {
 }
 
 async function boot(app) {
-  const user = await fetchViewer();
+  const user = IS_LOCAL_DEV_MODE ? { login: 'local-preview' } : await fetchViewer();
   writeJson(STORAGE_KEYS.user, user);
-  await ensurePrivateRepo(user.login);
+  if (!IS_LOCAL_DEV_MODE) await ensurePrivateRepo(user.login);
   renderAppShell(app, user);
 
   const localWorkspace = normalizeWorkspace(readJson(STORAGE_KEYS.workspace, createDefaultWorkspace()));
-  const remoteWorkspace = await readRemoteWorkspace(user.login);
+  const remoteWorkspace = IS_LOCAL_DEV_MODE ? null : await readRemoteWorkspace(user.login);
   const workspace = remoteWorkspace?.content || localWorkspace;
   writeJson(STORAGE_KEYS.workspace, workspace);
 
@@ -476,15 +493,21 @@ async function boot(app) {
   let syncTimer = null;
   let suppressSave = false;
   let selectedNode = null;
+  const currentMap = getCurrentMap(workspace);
+  const mindMapData = buildMindMapData(currentMap);
   const mindMap = new MindMap({
     el: document.getElementById('mindMapMount'),
-    data: buildMindMapData(getCurrentMap(workspace)),
+    data: currentMap.root,
+    layout: currentMap.layout || 'logicalStructure',
+    theme: mindMapData.theme.template,
+    themeConfig: mindMapData.theme.config,
     fit: true,
     enableAutoEnterTextEditWhenKeydown: true,
     disableTouchZoom: false,
     minTouchZoomScale: 10,
     maxTouchZoomScale: 300,
     openRealtimeRenderOnNodeTextEdit: true,
+    customCheckEnableShortcut: canUseMapShortcut,
     defaultInsertSecondLevelNodeText: '新しいトピック',
     defaultInsertBelowSecondLevelNodeText: '新しいトピック',
     nodeTextEditZIndex: 40,
@@ -512,20 +535,89 @@ async function boot(app) {
     selectedNode = node || null;
   }
 
-  function getRootNode() {
-    return mindMap.renderer?.root || null;
+function getRootNode() {
+  return mindMap.renderer?.root || null;
+}
+
+function refreshAssociativeLines() {
+  mindMap.associativeLine?.renderAllLines?.();
+}
+
+let connectMode = false;
+let connectEscHandler = null;
+
+function setConnectButtonActive(active) {
+  document.getElementById('connectBtn')?.classList.toggle('active', active);
+}
+
+function exitConnectMode(message = null) {
+  connectMode = false;
+  setConnectButtonActive(false);
+  if (connectEscHandler) {
+    document.removeEventListener('keydown', connectEscHandler);
+    connectEscHandler = null;
+  }
+  if (message) setStatus(message, 'muted');
+}
+
+function startConnect(fromNode = null) {
+  const al = mindMap.associativeLine;
+  if (!al) {
+    setStatus('関係線プラグインが見つかりません', 'error');
+    return;
   }
 
-  function isRootNode(node = selectedNode) {
-    const rootNode = getRootNode();
-    return Boolean(node && rootNode && node.getData('uid') === rootNode.getData('uid'));
+  if (al.isCreatingLine) {
+    al.cancelCreateLine();
+    exitConnectMode('関係線モードを解除しました');
+    return;
   }
 
-  function startNodeTextEdit(node = selectedNode) {
-    if (!node) return false;
-    mindMap.renderer?.textEdit?.show?.({ node, isInserting: false });
-    return true;
+  const startNode = fromNode ?? selectedNode ?? mindMap.renderer?.activeNodeList?.[0] ?? null;
+  if (!startNode) {
+    setStatus('先にノードを選択してください', 'error');
+    return;
   }
+
+  try {
+    mindMap.execCommand('CLEAR_ACTIVE_NODE');
+  } catch {}
+
+  al.createLine(startNode);
+  connectMode = true;
+  setConnectButtonActive(true);
+  setStatus('関係線モード: つなぐ先のノードをクリック', 'working');
+
+  connectEscHandler = (event) => {
+    if (event.key === 'Escape') {
+      al.cancelCreateLine();
+      exitConnectMode('関係線モードを解除しました');
+    }
+  };
+  document.addEventListener('keydown', connectEscHandler);
+
+  const onDeactivate = () => {
+    exitConnectMode();
+    queueSync();
+    mindMap.off('associative_line_deactivate', onDeactivate);
+  };
+  mindMap.on('associative_line_deactivate', onDeactivate);
+}
+
+function isRootNode(node = selectedNode) {
+  const rootNode = getRootNode();
+  return Boolean(node && rootNode && node.getData('uid') === rootNode.getData('uid'));
+}
+
+function getEditTargetNode() {
+  return selectedNode || mindMap.renderer?.activeNodeList?.[0] || getRootNode();
+}
+
+function startNodeTextEdit(node = selectedNode) {
+  if (!node) return false;
+  mindMap.renderer?.textEdit?.show?.({ node, isInserting: false });
+  return true;
+}
 
   function isTypingContext(target) {
     const el = target instanceof HTMLElement ? target : null;
@@ -577,9 +669,9 @@ async function boot(app) {
     updateSelectedNode(node);
   }
 
-  function moveSelectionByKeyboard(event) {
-    if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Up', 'Down', 'Left', 'Right'].includes(event.key)) return;
-    if (event.metaKey || event.ctrlKey || event.altKey || isTextEditing() || isTypingContext(event.target)) return;
+function moveSelectionByKeyboard(event) {
+if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Up', 'Down', 'Left', 'Right'].includes(event.key)) return;
+if (event.metaKey || event.ctrlKey || event.altKey || isTextEditing() || isTypingContext(event.target)) return;
 
     const anchorNode = selectedNode || mindMap.renderer?.activeNodeList?.[0] || getRootNode();
     if (!anchorNode) return;
@@ -587,12 +679,12 @@ async function boot(app) {
     const nextNode = getTreeNavigationTarget(anchorNode, event.key);
     if (!nextNode) return;
 
-    event.preventDefault();
-    activateNode(nextNode);
-  }
+event.preventDefault();
+activateNode(nextNode);
+}
 
-  function updateRootQuickAddButton() {
-    const rootNode = getRootNode();
+function updateRootQuickAddButton() {
+const rootNode = getRootNode();
     const rect = rootNode?.getRect?.();
     if (!rect) {
       rootQuickAddBtn.classList.remove('visible');
@@ -624,6 +716,10 @@ async function boot(app) {
     persistWorkspace();
     renderMapList(workspace);
     updateHeader();
+    if (IS_LOCAL_DEV_MODE) {
+      setStatus('ローカル保存済み', 'muted');
+      return;
+    }
     setStatus('同期中...', 'working');
     try {
       const result = await writeRemoteWorkspace(user.login, workspace, currentSha);
@@ -642,7 +738,7 @@ async function boot(app) {
     updateHeader();
     setStatus('ローカル保存済み', 'muted');
     clearTimeout(syncTimer);
-    syncTimer = setTimeout(syncNow, SYNC_DEBOUNCE_MS);
+    if (!IS_LOCAL_DEV_MODE) syncTimer = setTimeout(syncNow, SYNC_DEBOUNCE_MS);
   }
 
   function refitCanvas() {
@@ -682,12 +778,13 @@ async function boot(app) {
     persistWorkspace();
     renderMapList(workspace);
     updateHeader();
-    suppressSave = true;
-    mindMap.setFullData(buildMindMapData(nextMap));
-    suppressSave = false;
-    updateSelectedNode(null);
-    refitCanvas();
-  }
+  suppressSave = true;
+  mindMap.setFullData(buildMindMapData(nextMap));
+  suppressSave = false;
+  updateSelectedNode(null);
+  refitCanvas();
+  refreshAssociativeLines();
+}
 
   async function importMapFile(file) {
     if (!file) return;
@@ -716,7 +813,10 @@ async function boot(app) {
   refitCanvas();
 
   mindMap.on('data_change', queueSync);
-  mindMap.on('node_tree_render_end', updateRootQuickAddButton);
+  mindMap.on('node_tree_render_end', () => {
+    updateRootQuickAddButton();
+    refreshAssociativeLines();
+  });
   mindMap.on('node_active', (node, activeNodeList = []) => {
     updateSelectedNode(node || activeNodeList[0] || null);
   });
@@ -796,6 +896,9 @@ async function boot(app) {
   document.getElementById('addSiblingBtn').addEventListener('click', () => {
     if (!isTextEditing()) mindMap.execCommand('INSERT_NODE');
   });
+  document.getElementById('connectBtn').addEventListener('click', () => {
+    if (!isTextEditing()) startConnect();
+  });
   document.getElementById('deleteNodeBtn').addEventListener('click', () => {
     if (!isTextEditing()) mindMap.execCommand('REMOVE_NODE');
   });
@@ -806,14 +909,38 @@ async function boot(app) {
     window.location.reload();
   });
 
-  window.addEventListener('resize', refitCanvas);
+function triggerSelectedNodeTextEdit() {
+  if (isTextEditing()) return;
+  const targetNode = getEditTargetNode();
+  if (!targetNode) return;
+  
+  const isActive = mindMap.renderer?.activeNodeList?.includes(targetNode);
+  if (!isActive) {
+    activateNode(targetNode);
+  }
+  startNodeTextEdit(targetNode);
+}
+
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' || (!event.metaKey && !event.ctrlKey) || event.altKey || event.shiftKey) return;
+  if (isTypingContext(event.target)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  triggerSelectedNodeTextEdit();
+}, true);
+
+window.addEventListener('resize', refitCanvas);
 }
 
 const app = document.getElementById('app');
 
-if (getToken()) {
+if (getToken() || IS_LOCAL_DEV_MODE) {
   boot(app).catch((error) => {
     console.error(error);
+    if (IS_LOCAL_DEV_MODE) {
+      renderTokenScreen(app);
+      return;
+    }
     clearSession();
     renderTokenScreen(app);
   });
