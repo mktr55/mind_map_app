@@ -319,6 +319,9 @@ function renderAppShell(app, user) {
   app.innerHTML = `
     <main class="app-shell">
       <div id="mindMapMount" class="mindmap-canvas"></div>
+      <button id="rootQuickAddBtn" class="root-quick-add" type="button" aria-label="ルートノードに子ノードを追加">
+        <strong>+</strong><span>子ノード</span>
+      </button>
 
       <header id="topbarPanel" class="topbar-panel">
         <div class="topbar-grip"></div>
@@ -496,6 +499,7 @@ async function boot(app) {
   const mapTitleHeading = document.getElementById('mapTitleHeading');
   const statusPill = document.getElementById('statusPill');
   const importMapInput = document.getElementById('importMapInput');
+  const rootQuickAddBtn = document.getElementById('rootQuickAddBtn');
 
   const isTextEditing = () => Boolean(mindMap.renderer?.textEdit?.isShowTextEdit?.());
 
@@ -514,10 +518,31 @@ async function boot(app) {
     selectedNode = node || null;
   }
 
+  function getRootNode() {
+    return mindMap.renderer?.root || null;
+  }
+
+  function isRootNode(node = selectedNode) {
+    const rootNode = getRootNode();
+    return Boolean(node && rootNode && node.getData('uid') === rootNode.getData('uid'));
+  }
+
   function startNodeTextEdit(node = selectedNode) {
     if (!node) return false;
     mindMap.renderer?.textEdit?.show?.({ node, isInserting: false });
     return true;
+  }
+
+  function updateRootQuickAddButton() {
+    const rootNode = getRootNode();
+    const rect = rootNode?.getRect?.();
+    if (!rect) {
+      rootQuickAddBtn.classList.remove('visible');
+      return;
+    }
+    rootQuickAddBtn.style.left = `${rect.left + rect.width / 2}px`;
+    rootQuickAddBtn.style.top = `${rect.bottom + 14}px`;
+    rootQuickAddBtn.classList.add('visible');
   }
 
   function saveCurrentMapFromCanvas() {
@@ -567,6 +592,7 @@ async function boot(app) {
       window.requestAnimationFrame(() => {
         mindMap.resize();
         mindMap.view.fit();
+        updateRootQuickAddButton();
       });
     });
   }
@@ -634,8 +660,16 @@ async function boot(app) {
   refitCanvas();
 
   mindMap.on('data_change', queueSync);
+  mindMap.on('node_tree_render_end', updateRootQuickAddButton);
   mindMap.on('node_active', (node, activeNodeList = []) => {
     updateSelectedNode(node || activeNodeList[0] || null);
+  });
+  mindMap.on('node_text_edit_change', ({ node, text }) => {
+    if (!isRootNode(node)) return;
+    const currentMap = getCurrentMap(workspace);
+    const nextTitle = text?.trim() ? text : currentMap.title;
+    mapTitleHeading.textContent = nextTitle;
+    document.title = `${nextTitle} - MindFlow`;
   });
 
   document.getElementById('collapseSidebarBtn').addEventListener('click', () => setLayoutState('sidebar', true));
@@ -694,6 +728,11 @@ async function boot(app) {
   document.getElementById('importMapBtn').addEventListener('click', () => importMapInput.click());
   importMapInput.addEventListener('change', async (event) => {
     await importMapFile(event.target.files?.[0]);
+  });
+  rootQuickAddBtn.addEventListener('click', () => {
+    const rootNode = getRootNode();
+    if (!rootNode || isTextEditing()) return;
+    mindMap.execCommand('INSERT_CHILD_NODE', true, [rootNode]);
   });
 
   document.getElementById('addChildBtn').addEventListener('click', () => {
