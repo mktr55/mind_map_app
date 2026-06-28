@@ -371,11 +371,6 @@ function renderAppShell(app, user) {
         <span>Tools</span><strong>〈</strong>
       </button>
 
-      <section class="floating-node-editor">
-        <label for="nodeTextInput">選択ノード</label>
-        <input id="nodeTextInput" type="text" placeholder="ノードを選択" autocomplete="off" disabled />
-      </section>
-
       <div class="floating-status">
         <span id="statusPill" class="status-pill" data-tone="muted">ローカル保存済み</span>
         <button id="deleteMapBtn" class="danger-btn small-btn" type="button">このマップを削除</button>
@@ -484,8 +479,6 @@ async function boot(app) {
   let syncTimer = null;
   let suppressSave = false;
   let selectedNode = null;
-  let isUpdatingNodeInput = false;
-
   const mindMap = new MindMap({
     el: document.getElementById('mindMapMount'),
     data: buildMindMapData(getCurrentMap(workspace)),
@@ -502,7 +495,6 @@ async function boot(app) {
 
   const mapTitleHeading = document.getElementById('mapTitleHeading');
   const statusPill = document.getElementById('statusPill');
-  const nodeTextInput = document.getElementById('nodeTextInput');
   const importMapInput = document.getElementById('importMapInput');
 
   const isTextEditing = () => Boolean(mindMap.renderer?.textEdit?.isShowTextEdit?.());
@@ -518,13 +510,14 @@ async function boot(app) {
     document.title = `${currentMap.title} - MindFlow`;
   }
 
-  function updateNodeInput(node = selectedNode) {
+  function updateSelectedNode(node = selectedNode) {
     selectedNode = node || null;
-    isUpdatingNodeInput = true;
-    nodeTextInput.disabled = !selectedNode;
-    nodeTextInput.value = selectedNode?.getData?.('text') || '';
-    nodeTextInput.placeholder = selectedNode ? '文字を入力' : 'ノードを選択';
-    isUpdatingNodeInput = false;
+  }
+
+  function startNodeTextEdit(node = selectedNode) {
+    if (!node) return false;
+    mindMap.renderer?.textEdit?.show?.({ node, isInserting: false });
+    return true;
   }
 
   function saveCurrentMapFromCanvas() {
@@ -610,7 +603,7 @@ async function boot(app) {
     suppressSave = true;
     mindMap.setFullData(buildMindMapData(nextMap));
     suppressSave = false;
-    updateNodeInput(null);
+    updateSelectedNode(null);
     refitCanvas();
   }
 
@@ -637,27 +630,12 @@ async function boot(app) {
   renderMapList(workspace);
   updateHeader();
   updateLayoutState();
-  updateNodeInput(null);
+  updateSelectedNode(null);
   refitCanvas();
 
   mindMap.on('data_change', queueSync);
   mindMap.on('node_active', (node, activeNodeList = []) => {
-    updateNodeInput(node || activeNodeList[0] || null);
-  });
-  mindMap.on('node_text_edit_change', ({ node, text }) => {
-    if (node === selectedNode && document.activeElement !== nodeTextInput) {
-      isUpdatingNodeInput = true;
-      nodeTextInput.value = text || '';
-      isUpdatingNodeInput = false;
-    }
-  });
-
-  nodeTextInput.addEventListener('input', () => {
-    if (!selectedNode || isUpdatingNodeInput) return;
-    selectedNode.setText(nodeTextInput.value);
-  });
-  nodeTextInput.addEventListener('focus', () => {
-    mindMap.renderer?.textEdit?.hideEditTextBox?.();
+    updateSelectedNode(node || activeNodeList[0] || null);
   });
 
   document.getElementById('collapseSidebarBtn').addEventListener('click', () => setLayoutState('sidebar', true));
@@ -688,6 +666,7 @@ async function boot(app) {
   });
 
   document.getElementById('renameMapBtn').addEventListener('click', () => {
+    if (startNodeTextEdit()) return;
     const currentMap = getCurrentMap(workspace);
     const name = window.prompt('マップ名', currentMap.title);
     if (!name) return;

@@ -158,8 +158,7 @@ input:disabled {
   font-weight: 700;
 }
 
-.field input,
-.floating-node-editor input {
+.field input {
   width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(6, 9, 13, 0.54);
@@ -202,7 +201,6 @@ input:disabled {
 .topbar-panel,
 .sidebar-panel,
 .floating-toolbar,
-.floating-node-editor,
 .floating-status,
 .panel-handle {
   backdrop-filter: blur(22px) saturate(1.05);
@@ -417,37 +415,6 @@ input:disabled {
   color: #ffd6d9;
 }
 
-.floating-node-editor {
-  position: absolute;
-  left: 50%;
-  bottom: 24px;
-  z-index: 20;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  width: min(560px, calc(100vw - 40px));
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--panel);
-  transform: translateX(-50%);
-}
-
-.floating-node-editor label {
-  padding-left: 6px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 750;
-  white-space: nowrap;
-}
-
-.floating-node-editor input {
-  min-height: 38px;
-  padding: 0 14px;
-  border-radius: 999px;
-}
-
 .floating-status {
   position: absolute;
   right: 20px;
@@ -625,14 +592,6 @@ body.status-collapsed .panel-handle-status {
     justify-content: center;
     max-width: none;
     border-radius: var(--radius-lg);
-  }
-
-  .floating-node-editor {
-    right: 10px;
-    bottom: 10px;
-    left: 10px;
-    width: auto;
-    transform: none;
   }
 
   .floating-status {
