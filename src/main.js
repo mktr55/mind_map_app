@@ -11,7 +11,6 @@ const STORAGE_KEYS = {
   sidebarCollapsed: 'mindflow.sidebarCollapsed',
   headerCollapsed: 'mindflow.headerCollapsed',
   toolbarCollapsed: 'mindflow.toolbarCollapsed',
-  statusCollapsed: 'mindflow.statusCollapsed',
 };
 
 const API_BASE = 'https://api.github.com';
@@ -349,13 +348,17 @@ function renderAppShell(app, user) {
           </div>
           <button id="collapseSidebarBtn" class="icon-btn" type="button" aria-label="左パネルを折り畳む">〈</button>
         </div>
-        <div class="sidebar-actions">
-          <button id="importMapBtn" class="small-btn" type="button">インポート</button>
-          <button id="newMapBtn" class="primary-btn small-btn" type="button">新規</button>
-        </div>
-        <div id="mapList" class="map-list"></div>
-        <input id="importMapInput" type="file" accept=".opml,.xml,.mm,.json" hidden />
-      </aside>
+      <div class="sidebar-actions">
+        <button id="importMapBtn" class="small-btn" type="button">インポート</button>
+        <button id="newMapBtn" class="primary-btn small-btn" type="button">新規</button>
+      </div>
+      <div class="sidebar-status-row">
+        <span id="statusPill" class="status-pill" data-tone="muted">ローカル保存済み</span>
+        <button id="deleteMapBtn" class="danger-btn small-btn" type="button">このマップを削除</button>
+      </div>
+      <div id="mapList" class="map-list"></div>
+      <input id="importMapInput" type="file" accept=".opml,.xml,.mm,.json" hidden />
+    </aside>
 
       <button id="expandSidebarBtn" class="panel-handle panel-handle-left" type="button" aria-label="左パネルを開く">
         <strong>〉</strong><span>Maps</span>
@@ -374,16 +377,7 @@ function renderAppShell(app, user) {
         <span>Tools</span><strong>〈</strong>
       </button>
 
-      <div class="floating-status">
-        <span id="statusPill" class="status-pill" data-tone="muted">ローカル保存済み</span>
-        <button id="deleteMapBtn" class="danger-btn small-btn" type="button">このマップを削除</button>
-        <button id="collapseStatusBtn" class="icon-btn status-toggle-btn" type="button" aria-label="ステータスを折り畳む">〉</button>
-      </div>
-
-      <button id="expandStatusBtn" class="panel-handle panel-handle-status" type="button" aria-label="ステータスを開く">
-        <span>Status</span><strong>〈</strong>
-      </button>
-    </main>
+  </main>
   `;
 }
 
@@ -533,6 +527,70 @@ async function boot(app) {
     return true;
   }
 
+  function isTypingContext(target) {
+    const el = target instanceof HTMLElement ? target : null;
+    return Boolean(el && (el.matches('input, textarea, select') || el.isContentEditable));
+  }
+
+  function getNodeSiblings(node) {
+    return node?.parent?.children || [];
+  }
+
+  function getSiblingNode(node, step) {
+    const siblings = getNodeSiblings(node);
+    const index = siblings.findIndex((item) => item === node);
+    if (index === -1) return null;
+    return siblings[index + step] || null;
+  }
+
+  function getFirstVisibleChild(node) {
+    return node?.children?.[0] || null;
+  }
+
+  function getTreeNavigationTarget(anchorNode, arrowKey) {
+    if (!anchorNode) return null;
+
+    if (arrowKey === 'ArrowUp' || arrowKey === 'Up') {
+      return getSiblingNode(anchorNode, -1) || anchorNode.parent || null;
+    }
+
+    if (arrowKey === 'ArrowDown' || arrowKey === 'Down') {
+      return getFirstVisibleChild(anchorNode) || getSiblingNode(anchorNode, 1) || null;
+    }
+
+    if (arrowKey === 'ArrowLeft' || arrowKey === 'Left') {
+      return anchorNode.parent || getSiblingNode(anchorNode, -1) || null;
+    }
+
+    if (arrowKey === 'ArrowRight' || arrowKey === 'Right') {
+      return getFirstVisibleChild(anchorNode) || getSiblingNode(anchorNode, 1) || null;
+    }
+
+    return null;
+  }
+
+  function activateNode(node) {
+    if (!node) return;
+    mindMap.renderer?.clearActiveNodeList?.();
+    mindMap.renderer?.addNodeToActiveList?.(node, true);
+    mindMap.renderer?.emitNodeActiveEvent?.(node);
+    updateSelectedNode(node);
+  }
+
+  function moveSelectionByKeyboard(event) {
+    if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Up', 'Down', 'Left', 'Right'].includes(event.key)) return;
+    if (event.metaKey || event.ctrlKey || event.altKey || isTextEditing() || isTypingContext(event.target)) return;
+
+    const anchorNode = selectedNode || mindMap.renderer?.activeNodeList?.[0] || getRootNode();
+    if (!anchorNode) return;
+
+    const nextNode = getTreeNavigationTarget(anchorNode, event.key);
+    if (!nextNode) return;
+
+    event.preventDefault();
+    activateNode(nextNode);
+  }
+
   function updateRootQuickAddButton() {
     const rootNode = getRootNode();
     const rect = rootNode?.getRect?.();
@@ -602,7 +660,6 @@ async function boot(app) {
       sidebar: STORAGE_KEYS.sidebarCollapsed,
       header: STORAGE_KEYS.headerCollapsed,
       toolbar: STORAGE_KEYS.toolbarCollapsed,
-      status: STORAGE_KEYS.statusCollapsed,
     };
     const key = keyByKind[kind];
     document.body.classList.toggle(`${kind}-collapsed`, collapsed);
@@ -614,7 +671,6 @@ async function boot(app) {
     setLayoutState('sidebar', localStorage.getItem(STORAGE_KEYS.sidebarCollapsed) === 'true');
     setLayoutState('header', localStorage.getItem(STORAGE_KEYS.headerCollapsed) === 'true');
     setLayoutState('toolbar', localStorage.getItem(STORAGE_KEYS.toolbarCollapsed) === 'true');
-    setLayoutState('status', localStorage.getItem(STORAGE_KEYS.statusCollapsed) === 'true');
   }
 
   function loadMapIntoCanvas(mapId) {
@@ -671,6 +727,7 @@ async function boot(app) {
     mapTitleHeading.textContent = nextTitle;
     document.title = `${nextTitle} - MindFlow`;
   });
+  window.addEventListener('keydown', moveSelectionByKeyboard, true);
 
   document.getElementById('collapseSidebarBtn').addEventListener('click', () => setLayoutState('sidebar', true));
   document.getElementById('expandSidebarBtn').addEventListener('click', () => setLayoutState('sidebar', false));
@@ -678,8 +735,6 @@ async function boot(app) {
   document.getElementById('expandTopbarBtn').addEventListener('click', () => setLayoutState('header', false));
   document.getElementById('collapseToolbarBtn').addEventListener('click', () => setLayoutState('toolbar', true));
   document.getElementById('expandToolbarBtn').addEventListener('click', () => setLayoutState('toolbar', false));
-  document.getElementById('collapseStatusBtn').addEventListener('click', () => setLayoutState('status', true));
-  document.getElementById('expandStatusBtn').addEventListener('click', () => setLayoutState('status', false));
 
   document.getElementById('mapList').addEventListener('click', (event) => {
     const button = event.target.closest('[data-map-id]');

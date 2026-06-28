@@ -229,11 +229,10 @@ input:disabled {
   line-height: 1;
 }
 
-  .topbar-panel,
-  .sidebar-panel,
-  .floating-toolbar,
-  .floating-status,
-  .panel-handle {
+.topbar-panel,
+.sidebar-panel,
+.floating-toolbar,
+.panel-handle {
   backdrop-filter: blur(22px) saturate(1.05);
   box-shadow: var(--shadow);
 }
@@ -321,11 +320,6 @@ input:disabled {
   right: 20px;
 }
 
-.panel-handle-status {
-  right: 20px;
-  bottom: 24px;
-}
-
 .sidebar-panel {
   position: absolute;
   top: 108px;
@@ -360,6 +354,14 @@ input:disabled {
 .sidebar-actions {
   display: flex;
   gap: 8px;
+  margin-bottom: 14px;
+}
+
+.sidebar-status-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
   margin-bottom: 14px;
 }
 
@@ -446,23 +448,10 @@ input:disabled {
   color: #ffd6d9;
 }
 
-.floating-status {
-  position: absolute;
-  right: 20px;
-  bottom: 24px;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--panel);
-}
-
 .status-pill {
   display: inline-flex;
   align-items: center;
+  width: 100%;
   min-height: 34px;
   padding: 0 12px;
   border-radius: 999px;
@@ -530,17 +519,6 @@ body.toolbar-collapsed .panel-handle-toolbar {
   display: inline-flex;
 }
 
-body.status-collapsed .floating-status {
-  visibility: hidden;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateX(28px);
-}
-
-body.status-collapsed .panel-handle-status {
-  display: inline-flex;
-}
-
 body.header-collapsed.sidebar-collapsed .floating-toolbar {
   top: 18px;
   right: 20px;
@@ -560,11 +538,6 @@ body.sidebar-collapsed.toolbar-collapsed .panel-handle-toolbar {
 
 body.header-collapsed.sidebar-collapsed.toolbar-collapsed .panel-handle-toolbar {
   top: 18px;
-}
-
-body.status-collapsed .panel-handle-status {
-  right: 20px;
-  bottom: 24px;
 }
 
 @media (max-width: 860px) {
@@ -631,13 +604,6 @@ body.status-collapsed .panel-handle-status {
     border-radius: var(--radius-lg);
   }
 
-  .floating-status {
-    right: 10px;
-    bottom: 64px;
-    left: 10px;
-    justify-content: space-between;
-  }
-
   .panel-handle-top {
     top: 10px;
     left: 10px;
@@ -652,11 +618,6 @@ body.status-collapsed .panel-handle-status {
     top: auto;
     right: 10px;
     bottom: 116px;
-  }
-
-  .panel-handle-status {
-    right: 10px;
-    bottom: 64px;
   }
 
   body.header-collapsed .sidebar-panel {
@@ -678,8 +639,7 @@ body.status-collapsed .panel-handle-status {
     right: 10px;
   }
 
-  body.status-collapsed .panel-handle-status {
-    bottom: 64px;
-    right: 10px;
+  .sidebar-status-row {
+    grid-template-columns: 1fr;
   }
 }
