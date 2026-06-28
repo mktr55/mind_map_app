@@ -121,6 +121,14 @@ function closeSidebar() {
   currentNode = null;
   panel.classList.remove('open');
   backdrop.classList.remove('visible');
+  const activeElement = document.activeElement;
+  if (activeElement && panel.contains(activeElement)) {
+    activeElement.blur();
+  }
+  const canvas = document.getElementById('mindMapMount');
+  if (canvas instanceof HTMLElement) {
+    canvas.focus?.();
+  }
 }
 
 function applyChanges() {

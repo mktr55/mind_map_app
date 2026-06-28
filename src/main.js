@@ -1,10 +1,12 @@
 import MindMap from 'simple-mind-map';
 import TouchEvent from 'simple-mind-map/src/plugins/TouchEvent.js';
 import AssociativeLine from 'simple-mind-map/src/plugins/AssociativeLine.js';
+import KeyboardNavigation from 'simple-mind-map/src/plugins/KeyboardNavigation.js';
 import './style.css';
 
 MindMap.usePlugin(TouchEvent);
 MindMap.usePlugin(AssociativeLine);
+MindMap.usePlugin(KeyboardNavigation);
 
 const STORAGE_KEYS = {
   token: 'mindflow.githubToken',
@@ -333,7 +335,7 @@ function renderTokenScreen(app) {
 function renderAppShell(app, user) {
   app.innerHTML = `
     <main class="app-shell">
-      <div id="mindMapMount" class="mindmap-canvas"></div>
+      <div id="mindMapMount" class="mindmap-canvas" tabindex="-1"></div>
       <button id="rootQuickAddBtn" class="root-quick-add" type="button" aria-label="ルートノードに子ノードを追加">
         <strong>+</strong><span>子ノード</span>
       </button>
@@ -623,44 +625,6 @@ function startNodeTextEdit(node = selectedNode) {
     const el = target instanceof HTMLElement ? target : null;
     return Boolean(el && (el.matches('input, textarea, select') || el.isContentEditable));
   }
-
-  function getNodeSiblings(node) {
-    return node?.parent?.children || [];
-  }
-
-  function getSiblingNode(node, step) {
-    const siblings = getNodeSiblings(node);
-    const index = siblings.findIndex((item) => item === node);
-    if (index === -1) return null;
-    return siblings[index + step] || null;
-  }
-
-  function getFirstVisibleChild(node) {
-    return node?.children?.[0] || null;
-  }
-
-  function getTreeNavigationTarget(anchorNode, arrowKey) {
-    if (!anchorNode) return null;
-
-    if (arrowKey === 'ArrowUp' || arrowKey === 'Up') {
-      return getSiblingNode(anchorNode, -1) || anchorNode.parent || null;
-    }
-
-    if (arrowKey === 'ArrowDown' || arrowKey === 'Down') {
-      return getFirstVisibleChild(anchorNode) || getSiblingNode(anchorNode, 1) || null;
-    }
-
-    if (arrowKey === 'ArrowLeft' || arrowKey === 'Left') {
-      return anchorNode.parent || getSiblingNode(anchorNode, -1) || null;
-    }
-
-    if (arrowKey === 'ArrowRight' || arrowKey === 'Right') {
-      return getFirstVisibleChild(anchorNode) || getSiblingNode(anchorNode, 1) || null;
-    }
-
-    return null;
-  }
-
   function activateNode(node) {
     if (!node) return;
     mindMap.renderer?.clearActiveNodeList?.();
@@ -668,20 +632,6 @@ function startNodeTextEdit(node = selectedNode) {
     mindMap.renderer?.emitNodeActiveEvent?.(node);
     updateSelectedNode(node);
   }
-
-function moveSelectionByKeyboard(event) {
-if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Up', 'Down', 'Left', 'Right'].includes(event.key)) return;
-if (event.metaKey || event.ctrlKey || event.altKey || isTextEditing() || isTypingContext(event.target)) return;
-
-    const anchorNode = selectedNode || mindMap.renderer?.activeNodeList?.[0] || getRootNode();
-    if (!anchorNode) return;
-
-    const nextNode = getTreeNavigationTarget(anchorNode, event.key);
-    if (!nextNode) return;
-
-event.preventDefault();
-activateNode(nextNode);
-}
 
 function updateRootQuickAddButton() {
 const rootNode = getRootNode();
@@ -827,7 +777,6 @@ const rootNode = getRootNode();
     mapTitleHeading.textContent = nextTitle;
     document.title = `${nextTitle} - MindFlow`;
   });
-  window.addEventListener('keydown', moveSelectionByKeyboard, true);
 
   document.getElementById('collapseSidebarBtn').addEventListener('click', () => setLayoutState('sidebar', true));
   document.getElementById('expandSidebarBtn').addEventListener('click', () => setLayoutState('sidebar', false));
