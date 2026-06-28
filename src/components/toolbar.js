@@ -399,9 +399,9 @@ function onNodeContextMenuClick(e) {
   } else if (action === 'sidebar') {
     _onOpenSidebar?.(nodeContextMenuNode);
   } else if (action === 'child') {
-    _mindMap?.execCommand('INSERT_CHILD_NODE');
+    _mindMap?.__mindflowInsertChildNode?.(nodeContextMenuNode);
   } else if (action === 'sibling') {
-    _mindMap?.execCommand('INSERT_BROTHER_NODE');
+    _mindMap?.__mindflowInsertSiblingNode?.(nodeContextMenuNode);
   } else if (action === 'delete') {
     _mindMap?.execCommand('REMOVE_NODE');
   }

@@ -23,7 +23,8 @@ const DEFAULT_PATH = 'mindflow/workspace.json';
 const SYNC_DEBOUNCE_MS = 1200;
 const IS_LOCAL_DEV_MODE = import.meta.env.DEV && !getToken();
 
-function canUseMapShortcut(target) {
+function canUseMapShortcut(eventOrTarget) {
+  const target = eventOrTarget?.target || eventOrTarget;
   const el = target instanceof Element ? target : null;
   return Boolean(el && (el === document.body || el.closest('#mindMapMount') || el.closest('.smm-node-edit-wrap')));
 }
@@ -541,6 +542,25 @@ function getRootNode() {
   return mindMap.renderer?.root || null;
 }
 
+function getActionTargetNode() {
+  return selectedNode || mindMap.renderer?.activeNodeList?.[0] || getRootNode();
+}
+
+function insertChildNode(targetNode = getActionTargetNode()) {
+  if (!targetNode || isTextEditing()) return;
+  activateNode(targetNode);
+  mindMap.execCommand('INSERT_CHILD_NODE', true, [targetNode]);
+}
+
+function insertSiblingNode(targetNode = getActionTargetNode()) {
+  if (!targetNode || isTextEditing()) return;
+  activateNode(targetNode);
+  mindMap.execCommand('INSERT_NODE', true, [targetNode]);
+}
+
+mindMap.__mindflowInsertChildNode = insertChildNode;
+mindMap.__mindflowInsertSiblingNode = insertSiblingNode;
+
 function refreshAssociativeLines() {
   mindMap.associativeLine?.renderAllLines?.();
 }
@@ -621,17 +641,103 @@ function startNodeTextEdit(node = selectedNode) {
   return true;
 }
 
-  function isTypingContext(target) {
-    const el = target instanceof HTMLElement ? target : null;
-    return Boolean(el && (el.matches('input, textarea, select') || el.isContentEditable));
+function isTypingContext(target) {
+  const el = target instanceof HTMLElement ? target : null;
+  return Boolean(el && (el.matches('input, textarea, select') || el.isContentEditable));
+}
+function shouldHandleMapKey(event) {
+  return canUseMapShortcut(event) && !isTextEditing() && !isTypingContext(event.target) && !event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey;
+}
+function activateNode(node) {
+  if (!node) return;
+  mindMap.renderer?.clearActiveNodeList?.();
+  mindMap.renderer?.addNodeToActiveList?.(node, true);
+  mindMap.renderer?.emitNodeActiveEvent?.(node);
+  updateSelectedNode(node);
+}
+function collectRenderedNodes(rootNode = getRootNode()) {
+  const nodes = [];
+  const queue = rootNode ? [rootNode] : [];
+  while (queue.length) {
+    const node = queue.shift();
+    nodes.push(node);
+    if (node.children?.length) queue.push(...node.children);
   }
-  function activateNode(node) {
-    if (!node) return;
-    mindMap.renderer?.clearActiveNodeList?.();
-    mindMap.renderer?.addNodeToActiveList?.(node, true);
-    mindMap.renderer?.emitNodeActiveEvent?.(node);
-    updateSelectedNode(node);
+  return nodes;
+}
+function getNodeScreenRect(node) {
+  const rect = node?.getRect?.();
+  if (rect) {
+    const left = rect.left ?? rect.x;
+    const top = rect.top ?? rect.y;
+    const width = rect.width ?? 0;
+    const height = rect.height ?? 0;
+    return {
+      left,
+      top,
+      right: rect.right ?? rect.x2 ?? left + width,
+      bottom: rect.bottom ?? rect.y2 ?? top + height,
+      width,
+      height,
+    };
   }
+  const { scaleX = 1, scaleY = 1, translateX = 0, translateY = 0 } = mindMap.draw?.transform?.() || {};
+  return {
+    left: node.left * scaleX + translateX,
+    top: node.top * scaleY + translateY,
+    right: (node.left + node.width) * scaleX + translateX,
+    bottom: (node.top + node.height) * scaleY + translateY,
+    width: node.width * scaleX,
+    height: node.height * scaleY,
+  };
+}
+function findDirectionalNode(currentNode, dir) {
+  const currentRect = getNodeScreenRect(currentNode);
+  const currentCenter = {
+    x: currentRect.left + currentRect.width / 2,
+    y: currentRect.top + currentRect.height / 2,
+  };
+  return collectRenderedNodes()
+    .filter((node) => node !== currentNode)
+    .map((node) => {
+      const rect = getNodeScreenRect(node);
+      const center = {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+      };
+      const dx = center.x - currentCenter.x;
+      const dy = center.y - currentCenter.y;
+      const primary = dir === 'Left' || dir === 'Right' ? Math.abs(dx) : Math.abs(dy);
+      const cross = dir === 'Left' || dir === 'Right' ? Math.abs(dy) : Math.abs(dx);
+      const isForward =
+        (dir === 'Left' && dx < 0) ||
+        (dir === 'Right' && dx > 0) ||
+        (dir === 'Up' && dy < 0) ||
+        (dir === 'Down' && dy > 0);
+      return { node, isForward, score: primary + cross * 1.7 };
+    })
+    .filter((item) => item.isForward)
+    .sort((a, b) => a.score - b.score)[0]?.node || null;
+}
+function navigateNodeByArrow(key) {
+  const dirByKey = {
+    ArrowLeft: 'Left',
+    ArrowUp: 'Up',
+    ArrowRight: 'Right',
+    ArrowDown: 'Down',
+  };
+  const dir = dirByKey[key];
+  if (!dir) return false;
+  const currentNode = getActionTargetNode();
+  if (!currentNode) return true;
+  const targetNode = findDirectionalNode(currentNode, dir);
+  if (targetNode) {
+    mindMap.execCommand('GO_TARGET_NODE', targetNode, updateSelectedNode);
+  } else {
+    activateNode(currentNode);
+  }
+  return true;
+}
 
 function updateRootQuickAddButton() {
 const rootNode = getRootNode();
@@ -839,16 +945,14 @@ const rootNode = getRootNode();
     await importMapFile(event.target.files?.[0]);
   });
   rootQuickAddBtn.addEventListener('click', () => {
-    const rootNode = getRootNode();
-    if (!rootNode || isTextEditing()) return;
-    mindMap.execCommand('INSERT_CHILD_NODE', true, [rootNode]);
+  insertChildNode(getRootNode());
   });
 
   document.getElementById('addChildBtn').addEventListener('click', () => {
-    if (!isTextEditing()) mindMap.execCommand('INSERT_CHILD_NODE');
+  insertChildNode();
   });
   document.getElementById('addSiblingBtn').addEventListener('click', () => {
-    if (!isTextEditing()) mindMap.execCommand('INSERT_NODE');
+  insertSiblingNode();
   });
   document.getElementById('connectBtn').addEventListener('click', () => {
     if (!isTextEditing()) startConnect();
@@ -883,8 +987,28 @@ window.addEventListener('keydown', (event) => {
   triggerSelectedNodeTextEdit();
 }, true);
 
+window.addEventListener('keydown', (event) => {
+  if (!shouldHandleMapKey(event)) return;
+  if (event.key === 'Tab') {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    insertChildNode();
+    return;
+  }
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    insertSiblingNode();
+    return;
+  }
+  if (navigateNodeByArrow(event.key)) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+}, true);
+
 window.addEventListener('resize', refitCanvas);
-}
+  }
 
 const app = document.getElementById('app');
 
