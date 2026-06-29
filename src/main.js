@@ -543,19 +543,42 @@ function getRootNode() {
 }
 
 function getActionTargetNode() {
-  return selectedNode || mindMap.renderer?.activeNodeList?.[0] || getRootNode();
+  return mindMap.renderer?.activeNodeList?.[0] || selectedNode || getRootNode();
+}
+
+function runAfterNextRender(callback) {
+  let completed = false;
+  const finish = () => {
+    if (completed) return;
+    completed = true;
+    mindMap.off?.('node_tree_render_end', finish);
+    window.requestAnimationFrame(callback);
+  };
+  mindMap.on('node_tree_render_end', finish);
+  window.setTimeout(finish, 120);
+}
+
+function editInsertedNodeAfterRender() {
+  runAfterNextRender(() => {
+    const node = mindMap.renderer?.activeNodeList?.[0] || selectedNode;
+    if (!node) return;
+    activateNode(node);
+    startNodeTextEdit(node);
+  });
 }
 
 function insertChildNode(targetNode = getActionTargetNode()) {
   if (!targetNode || isTextEditing()) return;
   activateNode(targetNode);
-  mindMap.execCommand('INSERT_CHILD_NODE', true, [targetNode]);
+  editInsertedNodeAfterRender();
+  mindMap.execCommand('INSERT_CHILD_NODE', false, [targetNode]);
 }
 
 function insertSiblingNode(targetNode = getActionTargetNode()) {
   if (!targetNode || isTextEditing()) return;
   activateNode(targetNode);
-  mindMap.execCommand('INSERT_NODE', true, [targetNode]);
+  editInsertedNodeAfterRender();
+  mindMap.execCommand('INSERT_NODE', false, [targetNode]);
 }
 
 mindMap.__mindflowInsertChildNode = insertChildNode;
@@ -740,16 +763,18 @@ function navigateNodeByArrow(key) {
 }
 
 function updateRootQuickAddButton() {
-const rootNode = getRootNode();
-    const rect = rootNode?.getRect?.();
-    if (!rect) {
-      rootQuickAddBtn.classList.remove('visible');
-      return;
-    }
-    rootQuickAddBtn.style.left = `${rect.left + rect.width / 2}px`;
-    rootQuickAddBtn.style.top = `${rect.bottom + 14}px`;
-    rootQuickAddBtn.classList.add('visible');
+  const rootNode = getRootNode();
+  const rect = rootNode ? getNodeScreenRect(rootNode) : null;
+  if (!rect) {
+    rootQuickAddBtn.classList.remove('visible');
+    return;
   }
+  const left = Math.min(Math.max(rect.left + rect.width / 2, 56), window.innerWidth - 56);
+  const top = Math.min(Math.max(rect.bottom + 12, 86), window.innerHeight - 58);
+  rootQuickAddBtn.style.left = `${left}px`;
+  rootQuickAddBtn.style.top = `${top}px`;
+  rootQuickAddBtn.classList.add('visible');
+}
 
   function saveCurrentMapFromCanvas() {
     const currentMap = getCurrentMap(workspace);
