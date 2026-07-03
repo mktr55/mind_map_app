@@ -182,6 +182,7 @@ function renderShell(app, currentMap) {
         </div>
         <div class="elixir-actions">
           <a class="elixir-btn" href="${location.pathname}">現行版</a>
+          <button class="elixir-btn" id="elixirConnectBtn" type="button">関係線</button>
           <button class="elixir-btn" id="elixirUndoBtn" type="button">Undo</button>
           <button class="elixir-btn" id="elixirRedoBtn" type="button">Redo</button>
           <button class="elixir-btn" id="elixirFitBtn" type="button">Fit</button>
@@ -194,6 +195,7 @@ function renderShell(app, currentMap) {
         <div class="elixir-mobile-dock" id="elixirMobileDock">
           <button class="elixir-mobile-btn" id="elixirAddChildBtn" type="button">子追加</button>
           <button class="elixir-mobile-btn" id="elixirAddSiblingBtn" type="button">兄弟追加</button>
+          <button class="elixir-mobile-btn" id="elixirConnectMobileBtn" type="button">関係線</button>
           <button class="elixir-mobile-btn" id="elixirEditBtn" type="button">編集</button>
           <button class="elixir-mobile-btn danger" id="elixirDeleteBtn" type="button">削除</button>
         </div>
@@ -216,9 +218,11 @@ export function renderMindElixirSpike(app) {
   const mobileButtons = {
     addChild: document.getElementById('elixirAddChildBtn'),
     addSibling: document.getElementById('elixirAddSiblingBtn'),
+    connect: document.getElementById('elixirConnectMobileBtn'),
     edit: document.getElementById('elixirEditBtn'),
     remove: document.getElementById('elixirDeleteBtn'),
   };
+  const connectButton = document.getElementById('elixirConnectBtn');
 
   const mind = new MindElixir({
     el: '#elixirMap',
@@ -261,6 +265,18 @@ export function renderMindElixirSpike(app) {
 
   const getSelectedTopic = () => mind.currentNode || null;
   const isRootTopic = (topic) => Boolean(topic?.nodeObj && !topic.nodeObj.parent);
+  let connectSourceTopic = null;
+
+  const syncConnectButtons = () => {
+    const hasSelection = Boolean(getSelectedTopic());
+    const isActive = Boolean(connectSourceTopic);
+    connectButton.disabled = !hasSelection && !isActive;
+    mobileButtons.connect.disabled = !hasSelection && !isActive;
+    connectButton.classList.toggle('active', isActive);
+    mobileButtons.connect.classList.toggle('active', isActive);
+    connectButton.textContent = isActive ? '接続中' : '関係線';
+    mobileButtons.connect.textContent = isActive ? '接続中' : '関係線';
+  };
 
   const syncMobileActions = () => {
     const topic = getSelectedTopic();
@@ -269,6 +285,32 @@ export function renderMindElixirSpike(app) {
     mobileButtons.edit.disabled = !hasSelection;
     mobileButtons.addSibling.disabled = !hasSelection || isRootTopic(topic);
     mobileButtons.remove.disabled = !hasSelection || isRootTopic(topic);
+    syncConnectButtons();
+  };
+
+  const exitConnectMode = (message = null) => {
+    connectSourceTopic = null;
+    syncConnectButtons();
+    if (message) setStatus(message);
+  };
+
+  const enterConnectMode = () => {
+    const topic = getSelectedTopic();
+    if (!topic) {
+      setStatus('まず始点ノードを選択してください');
+      return;
+    }
+    connectSourceTopic = topic;
+    syncConnectButtons();
+    setStatus(`接続元: ${topic.nodeObj?.topic || 'ノード'}。次に接続先ノードを選択してください`);
+  };
+
+  const toggleConnectMode = () => {
+    if (connectSourceTopic) {
+      exitConnectMode('関係線モードを解除しました');
+      return;
+    }
+    enterConnectMode();
   };
 
   const save = (message = 'Mind Elixir の編集を workspace に保存しました') => {
@@ -283,7 +325,20 @@ export function renderMindElixirSpike(app) {
     saveTimer = setTimeout(() => save(`保存済み: ${operation?.name || 'operation'}`), 500);
     syncMobileActions();
   });
-  mind.bus.addListener('selectNodes', () => {
+  mind.bus.addListener('selectNodes', (nodes = []) => {
+    const selectedTopic = nodes[0] || getSelectedTopic();
+    if (connectSourceTopic && selectedTopic && selectedTopic !== connectSourceTopic) {
+      mind.createArrow(connectSourceTopic, selectedTopic, {
+        style: {
+          stroke: '#0f766e',
+          strokeWidth: 2.5,
+          labelColor: '#0f766e',
+        },
+      });
+      exitConnectMode(`関係線を追加しました: ${connectSourceTopic.nodeObj?.topic || '始点'} → ${selectedTopic.nodeObj?.topic || '終点'}`);
+    } else if (connectSourceTopic && selectedTopic === connectSourceTopic) {
+      setStatus('接続先として別のノードを選択してください');
+    }
     syncMobileActions();
   });
 
@@ -345,10 +400,12 @@ export function renderMindElixirSpike(app) {
   });
   mobileButtons.addChild.addEventListener('click', addChildFromSelection);
   mobileButtons.addSibling.addEventListener('click', addSiblingFromSelection);
+  mobileButtons.connect.addEventListener('click', toggleConnectMode);
   mobileButtons.edit.addEventListener('click', editSelection);
   mobileButtons.remove.addEventListener('click', () => {
     void removeSelection();
   });
+  connectButton.addEventListener('click', toggleConnectMode);
 
   syncMobileActions();
 

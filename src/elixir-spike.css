@@ -73,6 +73,12 @@
   color: #ffffff;
 }
 
+.elixir-btn.active {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #ffffff;
+}
+
 .elixir-stage {
   min-height: 0;
   padding: 0;
@@ -138,7 +144,7 @@
     bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
     z-index: 40;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 8px;
     padding: 10px;
     border: 1px solid rgba(23, 32, 51, 0.12);
@@ -167,6 +173,12 @@
 
   .elixir-mobile-btn.danger {
     color: #b42318;
+  }
+
+  .elixir-mobile-btn.active {
+    background: #0f766e;
+    border-color: #0f766e;
+    color: #ffffff;
   }
 
   .elixir-status {
