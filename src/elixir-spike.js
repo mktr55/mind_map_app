@@ -191,6 +191,12 @@ function renderShell(app, currentMap) {
       </header>
       <section class="elixir-stage">
         <div id="elixirMap" class="elixir-map"></div>
+        <div class="elixir-mobile-dock" id="elixirMobileDock">
+          <button class="elixir-mobile-btn" id="elixirAddChildBtn" type="button">子追加</button>
+          <button class="elixir-mobile-btn" id="elixirAddSiblingBtn" type="button">兄弟追加</button>
+          <button class="elixir-mobile-btn" id="elixirEditBtn" type="button">編集</button>
+          <button class="elixir-mobile-btn danger" id="elixirDeleteBtn" type="button">削除</button>
+        </div>
       </section>
       <footer class="elixir-status" id="elixirStatus">既存ワークスペースを Mind Elixir 形式で表示しています</footer>
     </main>
@@ -205,6 +211,13 @@ export function renderMindElixirSpike(app) {
   const status = document.getElementById('elixirStatus');
   const setStatus = (message) => {
     status.textContent = message;
+  };
+
+  const mobileButtons = {
+    addChild: document.getElementById('elixirAddChildBtn'),
+    addSibling: document.getElementById('elixirAddSiblingBtn'),
+    edit: document.getElementById('elixirEditBtn'),
+    remove: document.getElementById('elixirDeleteBtn'),
   };
 
   const mind = new MindElixir({
@@ -246,6 +259,18 @@ export function renderMindElixirSpike(app) {
   mind.init(workspaceToElixirData(workspace));
   mind.toCenter();
 
+  const getSelectedTopic = () => mind.currentNode || null;
+  const isRootTopic = (topic) => Boolean(topic?.nodeObj && !topic.nodeObj.parent);
+
+  const syncMobileActions = () => {
+    const topic = getSelectedTopic();
+    const hasSelection = Boolean(topic);
+    mobileButtons.addChild.disabled = !hasSelection;
+    mobileButtons.edit.disabled = !hasSelection;
+    mobileButtons.addSibling.disabled = !hasSelection || isRootTopic(topic);
+    mobileButtons.remove.disabled = !hasSelection || isRootTopic(topic);
+  };
+
   const save = (message = 'Mind Elixir の編集を workspace に保存しました') => {
     workspace = elixirDataToWorkspace(workspace, mind.getData());
     writeJson(STORAGE_KEYS.workspace, workspace);
@@ -256,7 +281,50 @@ export function renderMindElixirSpike(app) {
   mind.bus.addListener('operation', (operation) => {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => save(`保存済み: ${operation?.name || 'operation'}`), 500);
+    syncMobileActions();
   });
+  mind.bus.addListener('selectNodes', () => {
+    syncMobileActions();
+  });
+
+  const addChildFromSelection = () => {
+    const topic = getSelectedTopic();
+    if (!topic) {
+      setStatus('まずノードを選択してください');
+      return;
+    }
+    mind.addChild(topic);
+    syncMobileActions();
+  };
+
+  const addSiblingFromSelection = () => {
+    const topic = getSelectedTopic();
+    if (!topic || isRootTopic(topic)) {
+      setStatus('ルートノードには兄弟ノードを追加できません');
+      return;
+    }
+    mind.insertSibling('after', topic);
+    syncMobileActions();
+  };
+
+  const editSelection = () => {
+    const topic = getSelectedTopic();
+    if (!topic) {
+      setStatus('まずノードを選択してください');
+      return;
+    }
+    mind.beginEdit(topic);
+  };
+
+  const removeSelection = async () => {
+    const topic = getSelectedTopic();
+    if (!topic || isRootTopic(topic)) {
+      setStatus('ルートノードは削除できません');
+      return;
+    }
+    await mind.removeNodes([topic]);
+    syncMobileActions();
+  };
 
   document.getElementById('elixirSaveBtn').addEventListener('click', () => save());
   document.getElementById('elixirUndoBtn').addEventListener('click', () => {
@@ -275,6 +343,14 @@ export function renderMindElixirSpike(app) {
     save('JSON をエクスポートしました');
     downloadText(`${getCurrentMap(workspace).title || 'mindflow-elixir'}.json`, JSON.stringify(mind.getData(), null, 2));
   });
+  mobileButtons.addChild.addEventListener('click', addChildFromSelection);
+  mobileButtons.addSibling.addEventListener('click', addSiblingFromSelection);
+  mobileButtons.edit.addEventListener('click', editSelection);
+  mobileButtons.remove.addEventListener('click', () => {
+    void removeSelection();
+  });
+
+  syncMobileActions();
 
   window.__mindflowElixir = mind;
 }

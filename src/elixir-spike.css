@@ -85,6 +85,10 @@
   overflow: hidden;
 }
 
+.elixir-mobile-dock {
+  display: none;
+}
+
 .elixir-status {
   min-height: 38px;
   padding: 9px 14px;
@@ -123,7 +127,49 @@
   }
 
   .elixir-map {
-    height: calc(100vh - 146px);
+    height: calc(100vh - 220px);
     min-height: 360px;
+  }
+
+  .elixir-mobile-dock {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+    z-index: 40;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid rgba(23, 32, 51, 0.12);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 14px 40px rgba(23, 32, 51, 0.18);
+    backdrop-filter: blur(16px);
+  }
+
+  .elixir-mobile-btn {
+    appearance: none;
+    min-height: 48px;
+    padding: 0 6px;
+    border: 1px solid rgba(23, 32, 51, 0.14);
+    border-radius: 10px;
+    background: #ffffff;
+    color: #172033;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+  }
+
+  .elixir-mobile-btn:disabled {
+    opacity: 0.42;
+  }
+
+  .elixir-mobile-btn.danger {
+    color: #b42318;
+  }
+
+  .elixir-status {
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 74px);
   }
 }
