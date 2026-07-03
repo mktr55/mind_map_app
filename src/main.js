@@ -3,6 +3,7 @@ import TouchEvent from 'simple-mind-map/src/plugins/TouchEvent.js';
 import AssociativeLine from 'simple-mind-map/src/plugins/AssociativeLine.js';
 import KeyboardNavigation from 'simple-mind-map/src/plugins/KeyboardNavigation.js';
 import './style.css';
+import { renderMindElixirSpike } from './elixir-spike.js';
 
 MindMap.usePlugin(TouchEvent);
 MindMap.usePlugin(AssociativeLine);
@@ -1036,8 +1037,11 @@ window.addEventListener('resize', refitCanvas);
   }
 
 const app = document.getElementById('app');
+const isMindElixirSpike = new URLSearchParams(window.location.search).get('engine') === 'elixir';
 
-if (getToken() || IS_LOCAL_DEV_MODE) {
+if (isMindElixirSpike) {
+  renderMindElixirSpike(app);
+} else if (getToken() || IS_LOCAL_DEV_MODE) {
   boot(app).catch((error) => {
     console.error(error);
     if (IS_LOCAL_DEV_MODE) {
