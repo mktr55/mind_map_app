@@ -20,7 +20,37 @@ node node_modules/vite/bin/vite.js
 1. このリポジトリを GitHub に push
 2. GitHub Pages を有効化
 3. 初回アクセス時に GitHub token を入力
-4. `mktr55/mindflow-data` の `mindflow/mindflow.json` に保存
+4. `mindflow-data` の `mindflow/workspace.json` に保存
+
+## Obsidian / iCloud にミラー保存
+
+iPhone からは GitHub に同期し、Mac 側のスクリプトが Obsidian の iCloud フォルダへ Markdown と JSON をミラー保存します。
+
+```bash
+export MINDFLOW_GITHUB_TOKEN=ghp_...
+export MINDFLOW_GITHUB_OWNER=your-github-user
+npm run sync:obsidian
+```
+
+常駐同期する場合:
+
+```bash
+export MINDFLOW_GITHUB_TOKEN=ghp_...
+export MINDFLOW_GITHUB_OWNER=your-github-user
+npm run watch:obsidian
+```
+
+既定の保存先:
+
+```text
+/Users/kz/Library/Mobile Documents/iCloud~md~obsidian/Documents/Obsidian_from_Mac/10_Notes/mindmap
+```
+
+出力内容:
+
+- `mindflow-workspace.json`: アプリ復元用の全ワークスペース
+- `*.md`: Obsidian で読めるマップごとのアウトライン
+- `*.json`: マップごとの復元用データ
 
 ## Token 権限
 

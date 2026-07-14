@@ -16,6 +16,7 @@ const STORAGE_KEYS = {
   sidebarCollapsed: 'mindflow.sidebarCollapsed',
   headerCollapsed: 'mindflow.headerCollapsed',
   toolbarCollapsed: 'mindflow.toolbarCollapsed',
+  lastGithubSyncAt: 'mindflow.lastGithubSyncAt',
 };
 
 const API_BASE = 'https://api.github.com';
@@ -78,6 +79,18 @@ function readJson(key, fallback) {
 
 function writeJson(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
+}
+
+function formatSyncTime(value) {
+  if (!value) return '未同期';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '未同期';
+  return date.toLocaleString('ja-JP', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 function getToken() {
@@ -303,7 +316,7 @@ function renderTokenScreen(app) {
       <section class="login-panel">
         <p class="eyebrow">Private GitHub Sync</p>
         <h1>MindFlow</h1>
-        <p class="lede">GitHub Personal Access Token を入れると、マップを private repo に保存します。</p>
+        <p class="lede">GitHub Personal Access Token を入れると、iPhoneからprivate repoへ同期します。Obsidian/iCloudにはMac側でミラー保存します。</p>
         <form id="tokenForm" class="token-form">
           <label class="field" for="tokenInput">
             <span>GitHub Token</span>
@@ -345,9 +358,9 @@ function renderAppShell(app, user) {
       <header id="topbarPanel" class="topbar-panel">
         <div class="topbar-grip"></div>
         <div class="topbar-brand">
-          <p class="eyebrow">Signed in as @${escapeHtml(user.login)}</p>
+          <p class="eyebrow">同期先: GitHub @${escapeHtml(user.login)}</p>
           <h1 id="mapTitleHeading">MindFlow</h1>
-          <p class="repo-label">${escapeHtml(user.login)}/${DEFAULT_REPO}</p>
+          <p class="repo-label">${escapeHtml(user.login)}/${DEFAULT_REPO} / MacでObsidian・iCloudへミラー保存</p>
         </div>
         <div class="topbar-actions">
           <button id="syncBtn" class="small-btn" type="button">同期</button>
@@ -376,6 +389,7 @@ function renderAppShell(app, user) {
         <span id="statusPill" class="status-pill" data-tone="muted">ローカル保存済み</span>
         <button id="deleteMapBtn" class="danger-btn small-btn" type="button">このマップを削除</button>
       </div>
+      <p id="mirrorHint" class="mirror-hint">Obsidian/iCloud: Macの同期スクリプトでミラー保存</p>
       <div id="mapList" class="map-list"></div>
       <input id="importMapInput" type="file" accept=".opml,.xml,.mm,.json" hidden />
     </aside>
@@ -523,6 +537,10 @@ async function boot(app) {
   const rootQuickAddBtn = document.getElementById('rootQuickAddBtn');
 
   const isTextEditing = () => Boolean(mindMap.renderer?.textEdit?.isShowTextEdit?.());
+
+  function lastGithubSyncLabel() {
+    return `GitHub最終同期: ${formatSyncTime(localStorage.getItem(STORAGE_KEYS.lastGithubSyncAt))}`;
+  }
 
   function setStatus(message, tone = 'muted') {
     statusPill.textContent = message;
@@ -799,14 +817,16 @@ function updateRootQuickAddButton() {
     renderMapList(workspace);
     updateHeader();
     if (IS_LOCAL_DEV_MODE) {
-      setStatus('ローカル保存済み', 'muted');
+      setStatus('ローカル保存済み / GitHub未接続', 'muted');
       return;
     }
-    setStatus('同期中...', 'working');
+    setStatus('GitHubへ同期中...', 'working');
     try {
       const result = await writeRemoteWorkspace(user.login, workspace, currentSha);
       currentSha = result.content.sha;
-      setStatus('GitHubに保存済み', 'ok');
+      const syncedAt = new Date().toISOString();
+      localStorage.setItem(STORAGE_KEYS.lastGithubSyncAt, syncedAt);
+      setStatus(`GitHub保存済み ${formatSyncTime(syncedAt)}`, 'ok');
     } catch (error) {
       setStatus(`同期失敗: ${error.message}`, 'error');
     }
@@ -818,7 +838,7 @@ function updateRootQuickAddButton() {
     persistWorkspace();
     renderMapList(workspace);
     updateHeader();
-    setStatus('ローカル保存済み', 'muted');
+    setStatus(`ローカル保存済み / ${lastGithubSyncLabel()}`, 'muted');
     clearTimeout(syncTimer);
     if (!IS_LOCAL_DEV_MODE) syncTimer = setTimeout(syncNow, SYNC_DEBOUNCE_MS);
   }
@@ -846,9 +866,13 @@ function updateRootQuickAddButton() {
   }
 
   function updateLayoutState() {
-    setLayoutState('sidebar', localStorage.getItem(STORAGE_KEYS.sidebarCollapsed) === 'true');
-    setLayoutState('header', localStorage.getItem(STORAGE_KEYS.headerCollapsed) === 'true');
-    setLayoutState('toolbar', localStorage.getItem(STORAGE_KEYS.toolbarCollapsed) === 'true');
+    const isMobile = window.matchMedia('(max-width: 860px)').matches;
+    const storedSidebar = localStorage.getItem(STORAGE_KEYS.sidebarCollapsed);
+    const storedHeader = localStorage.getItem(STORAGE_KEYS.headerCollapsed);
+    const storedToolbar = localStorage.getItem(STORAGE_KEYS.toolbarCollapsed);
+    setLayoutState('sidebar', storedSidebar === null ? isMobile : storedSidebar === 'true');
+    setLayoutState('header', storedHeader === 'true');
+    setLayoutState('toolbar', storedToolbar === 'true');
   }
 
   function loadMapIntoCanvas(mapId) {
@@ -892,6 +916,7 @@ function updateRootQuickAddButton() {
   updateHeader();
   updateLayoutState();
   updateSelectedNode(null);
+  setStatus(IS_LOCAL_DEV_MODE ? 'ローカル保存済み / GitHub未接続' : lastGithubSyncLabel(), 'muted');
   refitCanvas();
 
   mindMap.on('data_change', queueSync);
